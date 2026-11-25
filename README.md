@@ -12,7 +12,7 @@ Translucent frosted gradients, luminous overhead specular rims, prismatic refrac
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![egui 0.37](https://img.shields.io/badge/egui-0.37.0-9CA7DE.svg)](https://crates.io/crates/egui/0.37.0)
 
-![egui-prismglass Interactive Showcase](assets/preview.gif)
+![egui-prismglass Interactive Showcase](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/preview.gif)
 
 </div>
 
@@ -22,11 +22,11 @@ Translucent frosted gradients, luminous overhead specular rims, prismatic refrac
 
 | **Frost Light (Apple Glass)** | **Onyx Dark (Apple Glass)** |
 | :---: | :---: |
-| ![Frost Light Theme](assets/showcase-frost.png) | ![Onyx Dark Theme](assets/showcase-onyx.png) |
+| ![Frost Light Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-frost.png) | ![Onyx Dark Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-onyx.png) |
 
 | **Minimal Light (Solid Flat)** | **Minimal Dark (Solid Flat)** |
 | :---: | :---: |
-| ![Minimal Light Theme](assets/showcase-minimal-light.png) | ![Minimal Dark Theme](assets/showcase-minimal-dark.png) |
+| ![Minimal Light Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-minimal-light.png) | ![Minimal Dark Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-minimal-dark.png) |
 
 ---
 
