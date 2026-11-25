@@ -1,0 +1,22 @@
+[package]
+name = "demo"
+description = "Interactive showcase demo for egui-prismglass."
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+
+[dependencies]
+eframe.workspace = true
+egui.workspace = true
+egui-prismglass.workspace = true
+
+[dev-dependencies]
+egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot"] }
+image = { version = "0.25", default-features = false, features = ["png"] }
+
+[lints]
+workspace = true

@@ -1,0 +1,27 @@
+[package]
+name = "egui-prismglass"
+description = "A glassmorphic design system and widget kit for egui with fallback-first frosted surfaces, luminous specular borders, and design tokens."
+readme = "../../README.md"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+authors.workspace = true
+keywords.workspace = true
+categories.workspace = true
+
+[features]
+default = []
+## Enables `serde::Serialize` and `serde::Deserialize` on design tokens and themes.
+serde = ["dep:serde", "egui/serde"]
+
+[dependencies]
+egui.workspace = true
+serde = { workspace = true, optional = true }
+
+[dev-dependencies]
+egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot"] }
+
+[lints]
+workspace = true
