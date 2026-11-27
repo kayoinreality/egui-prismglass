@@ -2,9 +2,9 @@
 
 <div align="center">
 
-**A fallback-first glassmorphic design system and widget kit for [`egui`](https://github.com/emilk/egui).**
+**A fallback-first 3D glassmorphic & minimal design system for [`egui`](https://github.com/emilk/egui) — now with real GPU backdrop blur & Apple Liquid Glass optics.**
 
-Translucent frosted gradients, luminous overhead specular rims, prismatic refraction highlights, elevation shadows, and cohesive design tokens—working out of the box on **every** `egui` backend with zero required GPU shaders.
+Pure-WGSL 4-level linear Dual-Kawase blur pyramid, curved-bevel lens refraction, subtle RGB chromatic dispersion, macOS vibrancy, frosted micro-grain, and live OpenGL grab-pass blur — with a zero-dependency pure-`egui` fallback that works on **every** backend.
 
 [![CI](https://github.com/kayoinreality/egui-prismglass/actions/workflows/ci.yml/badge.svg)](https://github.com/kayoinreality/egui-prismglass/actions/workflows/ci.yml)
 [![Crates.io](https://img.shields.io/crates/v/egui-prismglass.svg)](https://crates.io/crates/egui-prismglass)
@@ -18,82 +18,109 @@ Translucent frosted gradients, luminous overhead specular rims, prismatic refrac
 
 ---
 
-## Visual Themes (Glass & Minimal Solid)
+## Real GPU Liquid Glass & Minimal Themes
 
-| **Frost Light (Apple Glass)** | **Onyx Dark (Apple Glass)** |
+| **Apple Liquid Glass Optics (Snell Refraction & Tinted Pills)** | **Glacial Glass — Liquid Prism (Real GPU)** |
+| :---: | :---: |
+| ![Apple Liquid Glass Studio](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-liquid-studio.png) | ![Glacial Liquid Prism](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-liquid-prism.png) |
+
+| **Frost Light (Real GPU Dual-Kawase)** | **Onyx Dark (Real GPU Dual-Kawase)** |
 | :---: | :---: |
 | ![Frost Light Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-frost.png) | ![Onyx Dark Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-onyx.png) |
 
-| **Minimal Light (Solid Flat)** | **Minimal Dark (Solid Flat)** |
+| **Minimal Light (Neumorphic Flat)** | **Minimal Dark (Neumorphic Flat + Violet)** |
 | :---: | :---: |
-| ![Minimal Light Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-minimal-light.png) | ![Minimal Dark Theme](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-minimal-dark.png) |
+| ![Minimal Light Neumorphic](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-minimal-light.png) | ![Minimal Dark Neumorphic](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-minimal-dark.png) |
+
+<div align="center">
+
+**Tactile Neumorphism (Light & Dark) + 8 Curated Vibrant Color Palettes Across Every Theme**
+
+![Neumorphic Light & Dark Vibrant Palettes](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/showcase-neumorphic-palettes.png)
+
+</div>
 
 ---
 
 ## Why `egui-prismglass`?
 
-Most desktop teams still reach for Electron because native immediate-mode UIs take too long to style cleanly. And in `egui`, real GPU backdrop blur today targets specific host loops (`own-loop` `egui-wgpu` or `eframe+glow`), leaving mainstream `eframe+wgpu` (the default in `eframe 0.37`) and many WebAssembly setups without glass surfaces.
+Most desktop teams still reach for Electron because native immediate-mode UIs take too long to style with modern optical polish. **`egui-prismglass` brings Apple-grade Liquid Glass & Minimal design straight to native Rust + `egui` with `#![forbid(unsafe_code)]`:**
 
-**`egui-prismglass` bridges both gaps:**
-
-1. **Works everywhere on Day 1** — Every glass surface is painted using pure `egui` meshes and painters: clean flat-translucent frosted panes, Apple-style 1px double-hairline glass edges, delicate overhead light catch, and subtle diffuse shadows.
-2. **Two first-class design modes (`SurfaceStyle::Glass` & `SurfaceStyle::Minimal`)** — Switch the entire app between Apple-style glassmorphism (`Frost Light`, `Onyx Dark`, `Glacial Glass`) and ultra-clean solid flat UI (`Minimal Light`, `Minimal Dark`, also ideal for *Reduced Transparency* accessibility) with a single line of code.
-3. **Zero GPU / shader lock-in** — Runs identically on `eframe+wgpu`, `eframe+glow`, own-loop `egui-wgpu`, WebAssembly, and headless `egui_kittest` snapshot tests.
-4. **Real backdrop blur as an opt-in upgrade** — Design tokens already carry `blur_radius`, and every widget is architected around the backend-agnostic [`BackdropBlurProvider`](crates/egui-prismglass/src/blur.rs) seam so real GPU blur (`blur-wgpu` / `blur-glow` via `backdrop-blur-egui`) plugs in cleanly in `v0.2.0` without breaking widget APIs.
+1. **Real GPU Dual-Kawase + Apple Liquid Glass (`feature = "blur-wgpu"`)** — Pure-WGSL 4-level linear `Rgba16Float` blur pyramid (zero 8-bit banding), analytic rounded-rect SDF anti-aliasing, curved-bevel optical lens refraction, subtle RGB chromatic dispersion, macOS vibrancy saturation boost, Jimenez IGN frost micro-grain, and directional 3D studio bevels. Works on default `eframe` (`wgpu`), own-loop `egui-wgpu`, and headless `egui_kittest`.
+2. **Real Live-Framebuffer OpenGL Grab-Pass (`feature = "blur-glow"`)** — Wraps `backdrop-blur-glow` (`glow 0.17` / `egui_glow 0.37.0`) to grab and blur live OpenGL 3.3 / GLES 3.0 / WebGL 2.0 framebuffers on `eframe+glow`, layered cleanly under our 3D directional bevels.
+3. **Zero-Dependency Fallback (`default = []`)** — Every widget still renders cleanly out of the box with pure `egui` meshes, cached procedural frosted micro-grain, dual-layer 3D elevation + contact shadows, and directional bevels on **every** backend.
+4. **Two First-Class Design Modes (`SurfaceStyle::Glass` & `SurfaceStyle::Minimal`)** — Switch the entire app between 3D Liquid Glass (`Frost Light`, `Onyx Dark`, `Glacial Glass`) and ultra-clean solid flat UI (`Minimal Light`, `Minimal Dark`) in one line.
 
 ---
 
 ## Try the Demo in One Command
 
 ```bash
+# Default: real WGSL Dual-Kawase & Liquid Glass on eframe + wgpu
 cargo run -p demo
+
+# OpenGL live-framebuffer grab-pass blur on eframe + glow
+cargo run -p demo --example glow_blur --no-default-features --features blur-glow
 ```
 
 The interactive **PrismGlass Studio** demo includes:
-- Live switching across **Glass Themes** (`Frost Light`, `Onyx Dark`, `Glacial Glass`) and **Minimal Solid** (`Minimal Light`, `Minimal Dark`)
-- **Material Inspector** with real-time sliders for Glass Density, Edge Light Catch, Refraction Tint, Corner Radius, and Ambient Luminance
-- **Component Gallery** showcasing all 4 `GlassElevation` tiers and interactive widgets
-- **Design Token Explorer** with live `PrismPalette` swatches and hex values
+- Live **Optical Inspector** sliders for **Blur Radius**, **Edge Refraction**, **Prism Dispersion**, **Vibrancy Boost**, **Frost Grain**, and **Glass Density**
+- Live **Studio Backdrop Scene** switcher (`3D Waves`, `Liquid Prism`, `Studio Grid`) and **Real GPU Blur vs Fallback** toggle
+- **Component Gallery**, **Motion & Spring Physics** playground, and **Design Token Explorer**
 
 ---
 
 ## Quick Start
 
-Add `egui-prismglass` to your `Cargo.toml`:
+### 1. Add `egui-prismglass` to `Cargo.toml`
 
 ```toml
 [dependencies]
 egui = "0.37.0"
-egui-prismglass = "0.1.0"
+# Enable `blur-wgpu` for real WGSL Dual-Kawase + Liquid Glass on eframe (default wgpu backend):
+egui-prismglass = { version = "0.2.0", features = ["blur-wgpu"] }
+# Or use `features = ["blur-glow"]` for eframe+glow, or omit `features` for zero-dep fallback.
 ```
 
-Apply a theme and start composing surfaces:
+### 2. Install the GPU Blur Provider Once During Setup (`eframe`)
+
+```rust
+// Inside eframe::run_native(..., Box::new(|cc| { ... })):
+#[cfg(feature = "blur-wgpu")]
+if let Some(render_state) = cc.wgpu_render_state.as_ref() {
+    egui_prismglass::blur_wgpu::install(&cc.egui_ctx, render_state);
+}
+```
+
+*(For `eframe` + `glow`, call `egui_prismglass::blur_glow::install(&cc.egui_ctx, gl)` and call `provider.destroy(gl)` inside `eframe::App::on_exit`.)*
+
+### 3. Compose Liquid Glass Widgets
 
 ```rust
 use egui_prismglass::{
     BadgeVariant, GlassBadge, GlassButton, GlassCard, GlassElevation,
-    PrismContextExt, PrismTheme, paint_prism_backdrop,
+    PrismContextExt, PrismTheme, paint_prism_backdrop_ui,
 };
 
 fn render_ui(ui: &mut egui::Ui) {
     // 1. Pick Glass (frost / onyx / glacial) or Minimal Solid (minimal_light / minimal_dark):
-    let theme = PrismTheme::frost(); // or PrismTheme::minimal_light()
+    let theme = PrismTheme::onyx(); // or PrismTheme::frost() / PrismTheme::glacial()
     ui.ctx().set_prism_theme(theme.clone());
 
-    // 2. Paint the theme backdrop (atmospheric in Glass mode, clean flat canvas in Minimal mode):
+    // 2. Paint the studio backdrop (automatically GPU-accelerated when `blur-wgpu` is active):
     let rect = ui.max_rect();
-    paint_prism_backdrop(ui.painter(), rect, &theme, 0.0, 1.0);
+    paint_prism_backdrop_ui(ui, rect, &theme, 0.0, 1.0);
 
-    // 3. Compose widgets with zero boilerplate:
+    // 3. Every GlassCard / GlassPanel / GlassSidebar automatically gets real GPU blur & optics:
     GlassCard::new()
         .elevation(GlassElevation::Elevated)
         .show(ui, |ui| {
             ui.horizontal(|ui| {
-                ui.heading("PrismGlass Card");
-                ui.add(GlassBadge::new("Ready").variant(BadgeVariant::Success).dot(true));
+                ui.heading("PrismGlass v0.2");
+                ui.add(GlassBadge::new("Real GPU Blur").variant(BadgeVariant::Success).dot(true));
             });
 
-            ui.label("Clean translucent glass or crisp solid minimal UI on any backend.");
+            ui.label("Dual-Kawase linear blur, curved-bevel refraction, and 3D machined bevels.");
             ui.add_space(8.0);
 
             ui.horizontal(|ui| {
@@ -109,38 +136,32 @@ fn render_ui(ui: &mut egui::Ui) {
 
 ---
 
-## What's Included
+## Feature Flags
 
-| Module / Crate | Responsibility |
-| :--- | :--- |
-| `egui-prismglass::tokens` | `GlassSurfaceTokens`, `GlassElevation` (`Flat`, `Subtle`, `Elevated`, `Floating`), `PrismPalette`, `SpacingTokens`, `RadiusTokens` |
-| `egui-prismglass::theme` | `PrismTheme`, `ThemeMode`, `SurfaceStyle` (`Glass` / `Minimal`), `PrismPreset` (`Frost`, `Onyx`, `Glacial`, `MinimalLight`, `MinimalDark`), global `egui::Visuals` harmonization |
-| `egui-prismglass::painter` | Pure-`egui` 3D directional-bevel glass & solid minimal renderer (`paint_glass_surface`, `glass_surface_shapes`) & sculpted volumetric light-wave backdrop (`paint_prism_backdrop`) |
-| `egui-prismglass::anim` | Spring physics (`SpringConfig`, `SpringState`), `Easing` curves, `PrismAnimExt`, hover micro-lift, pulse, and shimmer helpers |
-| `egui-prismglass::widgets` | `GlassCard`, `GlassPanel`, `GlassButton`, `GlassSidebar` + `SidebarItem`, `GlassSlider`, `GlassBadge`, `GlassToggle` |
-| `egui-prismglass::blur` | Backend-agnostic `BackdropRequest`, `BlurCapability`, and `BackdropBlurProvider` seam for future real GPU blur |
-| `crates/demo` | Interactive **PrismGlass Studio** showcase app (`cargo run -p demo`) with Motion Kit playground |
-
-### Optional Features
-
-- `serde`: Enables `serde::Serialize` and `serde::Deserialize` on all design tokens and themes.
+| Feature | Default | Description |
+| :--- | :---: | :--- |
+| *(none)* | Yes | Zero-dependency fallback renderer with frosted micro-grain, dual 3D shadows, and directional bevels |
+| `blur-wgpu` | No | Pure-WGSL 4-level linear Dual-Kawase blur + Apple Liquid Glass optics on `wgpu 30` / `egui-wgpu 0.37.0` |
+| `blur-glow` | No | Live-framebuffer OpenGL 3.3 / GLES 3.0 / WebGL 2.0 grab-pass blur on `glow 0.17` / `egui_glow 0.37.0` |
+| `serde` | No | `Serialize` / `Deserialize` support for all tokens, scenes, and themes |
 
 ---
 
 ## `egui` Compatibility Table
 
-`egui` introduces breaking API changes regularly. `egui-prismglass` pins its `egui` version explicitly and documents every supported pairing below:
+`egui-prismglass` pins its `egui` version explicitly and documents every supported pairing below:
 
-| `egui-prismglass` | `egui` / `eframe` | MSRV | Status |
-| :---: | :---: | :---: | :---: |
-| `0.1.x` | `0.37.0` | `1.95` | Supported (current) |
+| `egui-prismglass` | `egui` / `eframe` | `wgpu` / `glow` | MSRV | Status |
+| :---: | :---: | :---: | :---: | :---: |
+| `0.2.x` | `0.37.0` | `wgpu 30.0` / `glow 0.17` | `1.95` | Supported (current) |
+| `0.1.x` | `0.37.0` | — (fallback only) | `1.95` | Maintenance |
 
 ---
 
 ## Roadmap
 
-- [x] **v0.1.0 (MVP)**: Design tokens, 5 built-in themes across 3D Apple Glass (`Frost Light`, `Onyx Dark`, `Glacial Glass`) and Minimal Solid (`Minimal Light`, `Minimal Dark`), directional 3D bevel glass painter, spring & easing animation kit (`anim`), 7 core widgets, interactive `demo`, CI across Linux/Windows/macOS.
-- [ ] **v0.2.0**: Opt-in real GPU backdrop blur features (`blur-glow` and `blur-wgpu`) integrating `backdrop-blur-egui` through `BackdropBlurProvider`.
+- [x] **v0.1.0**: Design tokens, 5 built-in presets across 3D Apple Glass & Minimal Solid, directional 3D bevel glass painter, spring & easing animation kit (`anim`), 7 core widgets, interactive `demo`, CI across Linux/Windows/macOS.
+- [x] **v0.2.0**: Real GPU backdrop blur & Apple Liquid Glass rendering (`blur-wgpu` WGSL Dual-Kawase + SDF bevel refraction/dispersion/vibrancy, `blur-glow` live OpenGL grab-pass, optical material tokens, 3 procedural studio scenes, upgraded fallback micro-grain & dual shadows).
 - [ ] **v0.3.0**: Extended widget set (`GlassTextField`, `GlassModal`, `GlassTabs`, `GlassToast`, `GlassProgressBar`) + WASM live web demo.
 
 ---

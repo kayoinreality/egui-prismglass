@@ -1,6 +1,6 @@
 [package]
 name = "demo"
-description = "Interactive showcase demo for egui-prismglass."
+description = "Interactive showcase demo for egui-prismglass with real GPU backdrop blur."
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -8,6 +8,15 @@ rust-version.workspace = true
 license.workspace = true
 repository.workspace = true
 authors.workspace = true
+
+[features]
+default = ["blur-wgpu"]
+blur-wgpu = ["egui-prismglass/blur-wgpu"]
+blur-glow = ["egui-prismglass/blur-glow", "eframe/glow"]
+
+[[example]]
+name = "glow_blur"
+required-features = ["blur-glow"]
 
 [dependencies]
 eframe.workspace = true

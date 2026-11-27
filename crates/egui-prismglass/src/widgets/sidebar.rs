@@ -5,7 +5,7 @@ use egui::{
     Stroke, Ui, pos2, vec2,
 };
 
-use crate::painter::{glass_surface_shapes, paint_glass_gradient_fill};
+use crate::painter::paint_glass_gradient_fill;
 use crate::theme::{PrismTheme, SurfaceStyle, ThemeMode};
 use crate::tokens::scale_alpha;
 
@@ -82,7 +82,14 @@ impl GlassSidebar {
             .inner
         });
 
-        let shapes = glass_surface_shapes(prepared.response.rect, &tokens);
+        let rect = prepared.response.rect;
+        let surface_id = ui.make_persistent_id((
+            "prism_sidebar_surface",
+            rect.min.x as i32,
+            rect.min.y as i32,
+        ));
+        let shapes =
+            crate::blur::resolve_glass_surface_shapes(ui, surface_id, rect, &tokens, &theme);
         ui.painter().set(bg_idx, Shape::Vec(shapes));
 
         prepared

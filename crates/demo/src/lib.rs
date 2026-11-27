@@ -11,9 +11,10 @@ use egui::{
     Stroke, StrokeKind, TextEdit, Ui, pos2, vec2,
 };
 use egui_prismglass::{
-    BadgeVariant, Easing, GlassBadge, GlassButton, GlassCard, GlassElevation, GlassPanel,
-    GlassSidebar, GlassSlider, GlassToggle, PrismAnimExt, PrismContextExt, PrismPreset, PrismTheme,
-    SidebarIcon, SidebarItem, SpringConfig, SurfaceStyle, ThemeMode, paint_prism_backdrop,
+    AccentPalette, BackdropScene, BadgeVariant, BlurCapability, Easing, GlassBadge, GlassButton,
+    GlassCard, GlassElevation, GlassPanel, GlassSidebar, GlassSlider, GlassToggle, PrismAnimExt,
+    PrismContextExt, PrismPreset, PrismTheme, SidebarIcon, SidebarItem, SpringConfig, SurfaceStyle,
+    ThemeMode, paint_prism_backdrop_ui,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -57,8 +58,9 @@ impl DemoApp {
             active_tab: DemoTab::Overview,
             orb_intensity: 1.0,
             animate_orbs: false,
-            prompt_input: "Synthesize adaptive glass tokens for high-DPI desktop apps".to_owned(),
-            last_action: "PrismGlass v0.1.0 ready — 3D Apple glass, Minimal solid & Spring motion"
+            prompt_input: "Synthesize adaptive liquid-glass tokens for high-DPI desktop apps"
+                .to_owned(),
+            last_action: "PrismGlass v0.2.0 — Real GPU Liquid Glass, Neumorphic Flat & 8 Palettes"
                 .to_owned(),
             demo_slider_a: 22.0,
             demo_slider_b: 0.35,
@@ -69,10 +71,18 @@ impl DemoApp {
         }
     }
 
-    /// Switches to a new preset while preserving current tab state.
+    /// Switches to a new preset while preserving current tab, accent palette, and backdrop/blur toggles.
     pub fn set_preset(&mut self, preset: PrismPreset) {
+        let scene = self.theme.backdrop_scene;
+        let real_blur = self.theme.real_blur_enabled;
+        let accent = self.theme.accent_palette;
         self.preset = preset;
         self.theme = preset.into_theme();
+        if preset != PrismPreset::Glacial {
+            self.theme.backdrop_scene = scene;
+        }
+        self.theme.real_blur_enabled = real_blur;
+        self.theme.set_accent_palette(accent);
     }
 
     /// Renders the full showcase UI into an `egui::Ui` (used by both `eframe` and headless snapshots).
@@ -89,13 +99,7 @@ impl DemoApp {
         };
 
         let viewport = ui.max_rect();
-        paint_prism_backdrop(
-            ui.painter(),
-            viewport,
-            &self.theme,
-            time_secs,
-            self.orb_intensity,
-        );
+        paint_prism_backdrop_ui(ui, viewport, &self.theme, time_secs, self.orb_intensity);
 
         Frame::NONE.inner_margin(Margin::same(18)).show(ui, |ui| {
             ui.horizontal_top(|ui| {
@@ -144,7 +148,7 @@ impl DemoApp {
                             .color(self.theme.palette.text_primary),
                     );
                     ui.label(
-                        RichText::new("Design Kit  v0.1")
+                        RichText::new("Design Kit  v0.2")
                             .size(11.0)
                             .color(self.theme.palette.text_muted),
                     );
@@ -160,7 +164,7 @@ impl DemoApp {
             );
 
             if SidebarItem::new(SidebarIcon::Prism, "Overview")
-                .badge("AI")
+                .badge("GPU")
                 .selected(self.active_tab == DemoTab::Overview)
                 .show(ui)
                 .clicked()
@@ -178,7 +182,6 @@ impl DemoApp {
             }
 
             if SidebarItem::new(SidebarIcon::Sliders, "Motion Kit")
-                .badge("New")
                 .selected(self.active_tab == DemoTab::Motion)
                 .show(ui)
                 .clicked()
@@ -194,10 +197,10 @@ impl DemoApp {
                 self.active_tab = DemoTab::Tokens;
             }
 
-            ui.add_space(10.0);
+            ui.add_space(6.0);
             ui.label(
                 RichText::new("GLASS THEMES")
-                    .size(10.5)
+                    .size(10.0)
                     .strong()
                     .color(self.theme.palette.text_muted),
             );
@@ -208,7 +211,7 @@ impl DemoApp {
                     .add(
                         GlassButton::secondary(preset.label())
                             .selected(active)
-                            .min_size(vec2(ui.available_width(), 30.0)),
+                            .min_size(vec2(ui.available_width(), 28.0)),
                     )
                     .clicked()
                 {
@@ -217,10 +220,10 @@ impl DemoApp {
                 }
             }
 
-            ui.add_space(8.0);
+            ui.add_space(6.0);
             ui.label(
-                RichText::new("MINIMAL SOLID")
-                    .size(10.5)
+                RichText::new("NEUMORPHIC FLAT")
+                    .size(10.0)
                     .strong()
                     .color(self.theme.palette.text_muted),
             );
@@ -231,7 +234,7 @@ impl DemoApp {
                     .add(
                         GlassButton::secondary(preset.label())
                             .selected(active)
-                            .min_size(vec2(ui.available_width(), 30.0)),
+                            .min_size(vec2(ui.available_width(), 28.0)),
                     )
                     .clicked()
                 {
@@ -240,35 +243,99 @@ impl DemoApp {
                 }
             }
 
-            ui.add_space(10.0);
+            ui.add_space(8.0);
+            ui.horizontal(|ui| {
+                ui.label(
+                    RichText::new("COLOR PALETTE")
+                        .size(10.0)
+                        .strong()
+                        .color(self.theme.palette.text_muted),
+                );
+                ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
+                    ui.label(
+                        RichText::new(self.theme.accent_palette.label())
+                            .size(10.5)
+                            .strong()
+                            .color(self.theme.palette.accent),
+                    );
+                });
+            });
+            ui.add_space(2.0);
+            ui.horizontal(|ui| {
+                ui.spacing_mut().item_spacing = vec2(6.0, 0.0);
+                for palette_choice in AccentPalette::ALL {
+                    let selected = self.theme.accent_palette == palette_choice;
+                    let (swatch_rect, resp) = ui.allocate_exact_size(vec2(20.0, 20.0), Sense::click());
+                    if resp.hovered() {
+                        ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+                    }
+                    let center = swatch_rect.center();
+                    let fill = palette_choice.swatch();
+                    if selected {
+                        ui.painter().circle_stroke(
+                            center,
+                            9.5,
+                            Stroke::new(1.8, self.theme.palette.text_primary),
+                        );
+                    } else if resp.hovered() {
+                        ui.painter().circle_stroke(
+                            center,
+                            9.0,
+                            Stroke::new(1.2, self.theme.palette.text_muted),
+                        );
+                    }
+                    ui.painter()
+                        .circle_filled(center, if selected { 6.6 } else { 7.5 }, fill);
+                    if resp.on_hover_text(palette_choice.label()).clicked() {
+                        self.theme.set_accent_palette(palette_choice);
+                        self.last_action =
+                            format!("Applied {} color palette", palette_choice.label());
+                    }
+                }
+            });
 
-            // Compact surface mode status card pinned near bottom of sidebar.
+            ui.add_space(8.0);
+
+            // Compact live rendering status card pinned near bottom of sidebar.
             GlassCard::new()
                 .elevation(GlassElevation::Subtle)
-                .padding(Margin::same(11))
+                .padding(Margin::symmetric(11, 9))
                 .fill_width(true)
                 .show(ui, |ui| {
-                    let (mode_badge, mode_desc) = match self.theme.surface_style {
-                        SurfaceStyle::Glass => (
-                            "Apple Glass",
-                            "Translucent surfaces with 1px hairline bevels. Runs on wgpu, glow, and WASM.",
+                    let cap = ui.ctx().prism_blur_capability();
+                    let (mode_badge, badge_variant, mode_desc) = match (self.theme.surface_style, cap)
+                    {
+                        (SurfaceStyle::Minimal, _) => (
+                            "Neumorphic Flat",
+                            BadgeVariant::Accent,
+                            "Sculpted tactile solid surfaces with dual soft shadows & vibrant accents.",
                         ),
-                        SurfaceStyle::Minimal => (
-                            "Minimal Solid",
-                            "Crisp opaque surfaces with 1px hairline borders and zero transparency.",
+                        (SurfaceStyle::Glass, BlurCapability::RealBackdrop { backend }) => (
+                            if backend.contains("glow") {
+                                "GPU Grab-Pass"
+                            } else {
+                                "GPU Dual-Kawase"
+                            },
+                            BadgeVariant::Success,
+                            "Real WGSL Dual-Kawase pyramid + Liquid Glass bevel refraction & vibrancy.",
+                        ),
+                        (SurfaceStyle::Glass, BlurCapability::FallbackOnly) => (
+                            "Fallback Glass",
+                            BadgeVariant::Warm,
+                            "Pure-egui translucent glass with cached frost grain & dual 3D shadows.",
                         ),
                     };
                     ui.horizontal(|ui| {
                         ui.add(
                             GlassBadge::new(mode_badge)
-                                .variant(BadgeVariant::Success)
+                                .variant(badge_variant)
                                 .dot(true),
                         );
                     });
-                    ui.add_space(5.0);
+                    ui.add_space(4.0);
                     ui.label(
                         RichText::new(mode_desc)
-                            .size(11.0)
+                            .size(10.5)
                             .color(self.theme.palette.text_secondary),
                     );
                 });
@@ -345,15 +412,50 @@ impl DemoApp {
     }
 
     fn render_overview(&mut self, ui: &mut Ui) {
+        let cap = ui.ctx().prism_blur_capability();
+        let (engine_val, engine_tag, engine_variant) = match (self.theme.surface_style, cap) {
+            (SurfaceStyle::Minimal, _) => ("Minimal", "Opaque", BadgeVariant::Neutral),
+            (SurfaceStyle::Glass, BlurCapability::RealBackdrop { backend }) => (
+                if backend.contains("glow") {
+                    "Glow GL"
+                } else {
+                    "WGSL GPU"
+                },
+                "Real Blur",
+                BadgeVariant::Success,
+            ),
+            (SurfaceStyle::Glass, BlurCapability::FallbackOnly) => {
+                ("Fallback", "Pure egui", BadgeVariant::Warm)
+            }
+        };
+
+        let blur_pts = self.theme.surface(GlassElevation::Elevated).blur_radius;
+        let refract_pct = (self
+            .theme
+            .surface(GlassElevation::Elevated)
+            .refraction_strength
+            * 100.0)
+            .round();
+
         // Row 1: 4 Equal-width KPI GlassCards.
         let kpis = [
-            ("Active Agents", "12", "+3 live", BadgeVariant::Success),
-            ("Render Cost", "0.42 ms", "Pure egui", BadgeVariant::Accent),
-            ("Glass Layers", "5", "Specular Rim", BadgeVariant::Neutral),
+            ("Blur Engine", engine_val, engine_tag, engine_variant),
             (
-                "Prism Refraction",
-                "94%",
-                "Fallback-first",
+                "Kawase Radius",
+                &format!("{blur_pts:.0} pt"),
+                "4-Level Pyramid",
+                BadgeVariant::Accent,
+            ),
+            (
+                "Bevel Refraction",
+                &format!("{refract_pct:.0}%"),
+                "Liquid Glass",
+                BadgeVariant::Neutral,
+            ),
+            (
+                "Studio Scene",
+                self.theme.backdrop_scene.label(),
+                "Linear HDR16",
                 BadgeVariant::Warm,
             ),
         ];
@@ -380,7 +482,7 @@ impl DemoApp {
                             ui.add_space(6.0);
                             ui.label(
                                 RichText::new(value)
-                                    .size(24.0)
+                                    .size(23.0)
                                     .strong()
                                     .color(self.theme.palette.text_primary),
                             );
@@ -395,8 +497,8 @@ impl DemoApp {
         // Row 2: AI Assistant Workspace (Left) + Live Material Inspector (Right).
         let total_w = ui.available_width();
         let gap = 14.0;
-        let left_w = ((total_w - gap) * 0.61).max(320.0);
-        let right_w = (total_w - gap - left_w).max(240.0);
+        let left_w = ((total_w - gap) * 0.59).max(320.0);
+        let right_w = (total_w - gap - left_w).max(260.0);
 
         ui.horizontal_top(|ui| {
             ui.spacing_mut().item_spacing = vec2(gap, gap);
@@ -408,54 +510,54 @@ impl DemoApp {
 
                 GlassCard::new()
                     .elevation(GlassElevation::Floating)
-                    .padding(Margin::same(20))
+                    .padding(Margin::symmetric(18, 15))
                     .fill_width(true)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Prism AI Workspace")
-                                    .size(16.5)
+                                RichText::new("Liquid Glass Optics")
+                                    .size(16.0)
                                     .strong()
                                     .color(self.theme.palette.text_primary),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                                 ui.add(
-                                    GlassBadge::new("Orchestrator Ready")
+                                    GlassBadge::new("v0.2 Rendering")
                                         .variant(BadgeVariant::Success)
                                         .dot(true),
                                 );
                             });
                         });
 
-                        ui.add_space(4.0);
+                        ui.add_space(3.0);
                         ui.label(
                             RichText::new(
-                                "Layered frosted cards with overhead specular bevels and subtle chromatic edge refraction.",
+                                "Real 4-level linear Dual-Kawase backdrop blur, curved-bevel lens refraction, RGB dispersion, and macOS vibrancy.",
                             )
-                            .size(12.5)
+                            .size(12.0)
                             .color(self.theme.palette.text_secondary),
                         );
 
-                        ui.add_space(12.0);
+                        ui.add_space(9.0);
 
-                        // Nested subtle glass activity items.
+                        // Nested subtle glass architecture items.
                         let items = [
                             (
-                                "Token Engine",
-                                "GlassSurfaceTokens decouples tint, gradient stops, specular rim, shadow, and blur radius.",
-                                "Core",
+                                "WGSL Dual-Kawase Pyramid",
+                                "4 downsample + continuous tent upsample passes in linear Rgba16Float — zero 8-bit banding.",
+                                "blur-wgpu",
                                 BadgeVariant::Accent,
                             ),
                             (
-                                "Universal Fallback",
-                                "Works on eframe+wgpu, eframe+glow, own-loop, and WASM without waiting for GPU blur.",
-                                "Day 1",
+                                "Apple Liquid Glass SDF",
+                                "Analytic rounded-rect SDF bends backdrop UVs along machined bevel edges with subtle prism dispersion.",
+                                "Optics",
                                 BadgeVariant::Success,
                             ),
                             (
-                                "Blur Upgrade Seam",
-                                "BackdropBlurProvider keeps widgets ready for backdrop-blur-egui via blur-wgpu / blur-glow.",
-                                "v0.2",
+                                "OpenGL Grab-Pass & Fallback",
+                                "Opt-in live framebuffer blur on eframe+glow, plus upgraded frosted micro-grain & dual shadows everywhere.",
+                                "blur-glow",
                                 BadgeVariant::Warm,
                             ),
                         ];
@@ -463,13 +565,13 @@ impl DemoApp {
                         for (title, desc, badge, variant) in items {
                             GlassCard::new()
                                 .elevation(GlassElevation::Subtle)
-                                .padding(Margin::symmetric(14, 11))
+                                .padding(Margin::symmetric(13, 9))
                                 .fill_width(true)
                                 .show(ui, |ui| {
                                     ui.horizontal(|ui| {
                                         ui.label(
                                             RichText::new(title)
-                                                .size(13.5)
+                                                .size(13.0)
                                                 .strong()
                                                 .color(self.theme.palette.text_primary),
                                         );
@@ -480,29 +582,29 @@ impl DemoApp {
                                             },
                                         );
                                     });
-                                    ui.add_space(3.0);
+                                    ui.add_space(2.0);
                                     ui.label(
                                         RichText::new(desc)
-                                            .size(12.0)
+                                            .size(11.5)
                                             .color(self.theme.palette.text_secondary),
                                     );
                                 });
-                            ui.add_space(6.0);
+                            ui.add_space(4.0);
                         }
 
-                        ui.add_space(6.0);
+                        ui.add_space(4.0);
 
                         // Frosted prompt input bar.
                         GlassCard::new()
                             .elevation(GlassElevation::Flat)
-                            .corner_radius(14.0)
-                            .padding(Margin::symmetric(12, 8))
+                            .corner_radius(13.0)
+                            .padding(Margin::symmetric(12, 6))
                             .fill_width(true)
                             .show(ui, |ui| {
                                 ui.horizontal(|ui| {
                                     let input_w = (ui.available_width() - 122.0).max(120.0);
                                     ui.add_sized(
-                                        vec2(input_w, 30.0),
+                                        vec2(input_w, 28.0),
                                         TextEdit::singleline(&mut self.prompt_input)
                                             .frame(Frame::NONE)
                                             .hint_text("Ask PrismGlass AI..."),
@@ -523,11 +625,11 @@ impl DemoApp {
                 // Compact action bar card showcasing all button variants.
                 GlassCard::new()
                     .elevation(GlassElevation::Elevated)
-                    .padding(Margin::symmetric(18, 14))
+                    .padding(Margin::symmetric(16, 11))
                     .fill_width(true)
                     .show(ui, |ui| {
                         ui.horizontal_wrapped(|ui| {
-                            ui.spacing_mut().item_spacing = vec2(10.0, 8.0);
+                            ui.spacing_mut().item_spacing = vec2(10.0, 6.0);
                             if ui
                                 .add(GlassButton::primary("Primary CTA").pill(true))
                                 .clicked()
@@ -535,10 +637,10 @@ impl DemoApp {
                                 "Clicked Primary glass button".clone_into(&mut self.last_action);
                             }
                             if ui
-                                .add(GlassButton::accent("Accent Blue").pill(true))
+                                .add(GlassButton::accent("Accent CTA").pill(true))
                                 .clicked()
                             {
-                                "Clicked Antigravity Blue button".clone_into(&mut self.last_action);
+                                "Clicked Accent CTA button".clone_into(&mut self.last_action);
                             }
                             if ui
                                 .add(GlassButton::secondary("Frosted Glass").pill(true))
@@ -554,79 +656,124 @@ impl DemoApp {
                     });
             });
 
-            // Right column: Live Glass Material Inspector.
+            // Right column: Live Optical Material Inspector.
             ui.vertical(|ui| {
                 ui.set_width(right_w);
 
                 GlassCard::new()
                     .elevation(GlassElevation::Elevated)
-                    .padding(Margin::same(18))
+                    .padding(Margin::symmetric(16, 14))
                     .fill_width(true)
                     .show(ui, |ui| {
                         ui.horizontal(|ui| {
                             ui.label(
-                                RichText::new("Material Inspector")
-                                    .size(16.0)
+                                RichText::new("Optical Inspector")
+                                    .size(15.5)
                                     .strong()
                                     .color(self.theme.palette.text_primary),
                             );
                             ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                                ui.add(GlassBadge::new("Live").variant(BadgeVariant::Warm).dot(true));
+                                ui.add(
+                                    GlassBadge::new("Live GPU")
+                                        .variant(BadgeVariant::Accent)
+                                        .dot(true),
+                                );
                             });
                         });
-                        ui.add_space(4.0);
+                        ui.add_space(2.0);
                         ui.label(
-                            RichText::new("Adjust glass tokens in real time across every surface.")
-                                .size(12.0)
-                                .color(self.theme.palette.text_secondary),
+                            RichText::new(
+                                "Dial real backdrop blur, edge refraction, vibrancy, and scene.",
+                            )
+                            .size(11.5)
+                            .color(self.theme.palette.text_secondary),
                         );
 
-                        ui.add_space(12.0);
+                        ui.add_space(8.0);
+                        ui.label(
+                            RichText::new("BACKDROP SCENE")
+                                .size(10.0)
+                                .strong()
+                                .color(self.theme.palette.text_muted),
+                        );
+                        ui.add_space(3.0);
+                        ui.horizontal(|ui| {
+                            ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
+                            let btn_w = ((ui.available_width() - 12.0) / 3.0).max(68.0);
+                            for scene in [
+                                BackdropScene::SculptedWaves,
+                                BackdropScene::LiquidPrism,
+                                BackdropScene::ArchitecturalGrid,
+                            ] {
+                                let selected = self.theme.backdrop_scene == scene;
+                                if ui
+                                    .add(
+                                        GlassButton::secondary(scene.label())
+                                            .selected(selected)
+                                            .min_size(vec2(btn_w, 27.0)),
+                                    )
+                                    .clicked()
+                                {
+                                    self.theme.backdrop_scene = scene;
+                                    self.last_action =
+                                        format!("Switched studio scene to {}", scene.label());
+                                }
+                            }
+                        });
+
+                        ui.add_space(8.0);
+                        ui.horizontal(|ui| {
+                            ui.add(
+                                GlassToggle::new(&mut self.theme.real_blur_enabled)
+                                    .label("Real GPU Blur"),
+                            );
+                            ui.add_space(12.0);
+                            ui.add(GlassToggle::new(&mut self.animate_orbs).label("Animate"));
+                        });
+
+                        ui.add_space(8.0);
                         ui.add(
-                            GlassSlider::new(&mut self.theme.glass_opacity_scale, 0.45..=1.55)
-                                .label("Glass Density")
+                            GlassSlider::new(&mut self.theme.blur_radius_scale, 0.0..=1.8)
+                                .label("Blur Radius")
                                 .suffix("x"),
                         );
-                        ui.add_space(6.0);
+                        ui.add_space(2.0);
                         ui.add(
-                            GlassSlider::new(&mut self.theme.specular_scale, 0.0..=1.8)
-                                .label("Specular Rim")
-                                .suffix("x"),
-                        );
-                        ui.add_space(6.0);
-                        ui.add(
-                            GlassSlider::new(&mut self.theme.prism_scale, 0.0..=1.5)
-                                .label("Prism Refraction")
+                            GlassSlider::new(&mut self.theme.refraction_scale, 0.0..=2.0)
+                                .label("Edge Refraction")
                                 .suffix("x")
                                 .accent(self.theme.palette.accent_warm),
                         );
-                        ui.add_space(6.0);
+                        ui.add_space(2.0);
                         ui.add(
-                            GlassSlider::new(&mut self.theme.radius_scale, 0.35..=1.5)
-                                .label("Corner Radius")
+                            GlassSlider::new(&mut self.theme.dispersion_scale, 0.0..=2.2)
+                                .label("Prism Dispersion")
                                 .suffix("x"),
                         );
-                        ui.add_space(6.0);
+                        ui.add_space(2.0);
                         ui.add(
-                            GlassSlider::new(&mut self.orb_intensity, 0.0..=1.4)
-                                .label("Aurora Backdrop")
+                            GlassSlider::new(&mut self.theme.vibrancy_scale, 0.7..=1.5)
+                                .label("Vibrancy Boost")
+                                .suffix("x"),
+                        );
+                        ui.add_space(4.0);
+                        ui.add(
+                            GlassSlider::new(&mut self.theme.grain_scale, 0.0..=2.0)
+                                .label("Frost Grain")
                                 .suffix("x"),
                         );
 
-                        ui.add_space(12.0);
-                        ui.add(GlassToggle::new(&mut self.animate_orbs).label("Animate ambient orbs"));
-
-                        ui.add_space(12.0);
+                        ui.add_space(10.0);
                         if ui
                             .add(
-                                GlassButton::secondary("Reset Material Defaults")
-                                    .min_size(vec2(ui.available_width(), 34.0)),
+                                GlassButton::secondary("Reset Optical Defaults")
+                                    .min_size(vec2(ui.available_width(), 32.0)),
                             )
                             .clicked()
                         {
                             self.set_preset(self.preset);
                             self.orb_intensity = 1.0;
-                            "Reset material tokens to preset defaults"
+                            "Reset optical tokens to preset defaults"
                                 .clone_into(&mut self.last_action);
                         }
                     });

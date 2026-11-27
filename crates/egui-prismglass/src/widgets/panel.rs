@@ -2,7 +2,6 @@
 
 use egui::{Color32, Frame, InnerResponse, Margin, Shape, Ui};
 
-use crate::painter::glass_surface_shapes;
 use crate::theme::PrismTheme;
 use crate::tokens::GlassElevation;
 
@@ -111,7 +110,11 @@ impl GlassPanel {
             .inner
         });
 
-        let shapes = glass_surface_shapes(prepared.response.rect, &tokens);
+        let rect = prepared.response.rect;
+        let surface_id =
+            ui.make_persistent_id(("prism_panel_surface", rect.min.x as i32, rect.min.y as i32));
+        let shapes =
+            crate::blur::resolve_glass_surface_shapes(ui, surface_id, rect, &tokens, &theme);
         ui.painter().set(bg_idx, Shape::Vec(shapes));
 
         prepared

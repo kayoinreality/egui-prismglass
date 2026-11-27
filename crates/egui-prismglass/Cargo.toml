@@ -1,6 +1,6 @@
 [package]
 name = "egui-prismglass"
-description = "A glassmorphic design system and widget kit for egui with fallback-first frosted surfaces, luminous specular borders, and design tokens."
+description = "A fallback-first 3D glassmorphic & minimal design system for egui with opt-in real GPU backdrop blur (WGSL Dual-Kawase + Apple Liquid Glass optics for wgpu, live grab-pass for glow)."
 readme = "../../README.md"
 version.workspace = true
 edition.workspace = true
@@ -15,10 +15,21 @@ categories.workspace = true
 default = []
 ## Enables `serde::Serialize` and `serde::Deserialize` on design tokens and themes.
 serde = ["dep:serde", "egui/serde"]
+## Enables real GPU Dual-Kawase backdrop blur + Apple Liquid Glass WGSL optics on `wgpu 30` (`eframe+wgpu` & own-loop `egui-wgpu`).
+blur-wgpu = ["dep:wgpu", "dep:egui-wgpu", "dep:bytemuck"]
+## Enables live-framebuffer grab-pass backdrop blur on `glow 0.17` (`eframe+glow`) via `backdrop-blur-glow`.
+blur-glow = ["dep:backdrop-blur-core", "dep:backdrop-blur-glow", "dep:egui_glow", "dep:glow"]
 
 [dependencies]
 egui.workspace = true
 serde = { workspace = true, optional = true }
+wgpu = { workspace = true, optional = true }
+egui-wgpu = { workspace = true, optional = true }
+bytemuck = { workspace = true, optional = true }
+backdrop-blur-core = { workspace = true, optional = true }
+backdrop-blur-glow = { workspace = true, optional = true }
+egui_glow = { workspace = true, optional = true }
+glow = { workspace = true, optional = true }
 
 [dev-dependencies]
 egui_kittest = { version = "0.37.0", features = ["wgpu", "snapshot"] }

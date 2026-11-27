@@ -2,9 +2,8 @@
 
 use egui::{Color32, Frame, InnerResponse, Margin, Sense, Shape, Ui};
 
-use crate::painter::glass_surface_shapes;
 use crate::theme::PrismTheme;
-use crate::tokens::GlassElevation;
+use crate::tokens::{GlassElevation, GlassSurfaceTokens};
 
 /// A translucent frosted-glass card container with gradient fill, luminous top
 /// specular border, and soft elevation shadow.
@@ -24,6 +23,7 @@ use crate::tokens::GlassElevation;
 #[derive(Debug, Clone)]
 pub struct GlassCard {
     elevation: GlassElevation,
+    tokens_override: Option<GlassSurfaceTokens>,
     padding: Option<Margin>,
     corner_radius: Option<f32>,
     tint_override: Option<Color32>,
@@ -44,6 +44,7 @@ impl GlassCard {
     pub fn new() -> Self {
         Self {
             elevation: GlassElevation::Elevated,
+            tokens_override: None,
             padding: None,
             corner_radius: None,
             tint_override: None,
@@ -57,6 +58,12 @@ impl GlassCard {
     /// Sets the card's glass elevation tier.
     pub fn elevation(mut self, elevation: GlassElevation) -> Self {
         self.elevation = elevation;
+        self
+    }
+
+    /// Replaces the resolved [`GlassSurfaceTokens`] directly for full custom optical control.
+    pub fn tokens(mut self, tokens: GlassSurfaceTokens) -> Self {
+        self.tokens_override = Some(tokens);
         self
     }
 
@@ -105,7 +112,9 @@ impl GlassCard {
     /// Renders the glass card and executes `add_contents` inside its padded body.
     pub fn show<R>(self, ui: &mut Ui, add_contents: impl FnOnce(&mut Ui) -> R) -> InnerResponse<R> {
         let theme = PrismTheme::from_ctx(ui.ctx());
-        let mut tokens = theme.surface(self.elevation);
+        let mut tokens = self
+            .tokens_override
+            .unwrap_or_else(|| theme.surface(self.elevation));
         if let Some(r) = self.corner_radius {
             tokens = tokens.with_corner_radius(r);
         }
@@ -169,7 +178,18 @@ impl GlassCard {
             (rect, tokens)
         };
 
-        let shapes = glass_surface_shapes(effective_rect, &effective_tokens);
+        let surface_id = ui.make_persistent_id((
+            "prism_card_surface",
+            effective_rect.min.x as i32,
+            effective_rect.min.y as i32,
+        ));
+        let shapes = crate::blur::resolve_glass_surface_shapes(
+            ui,
+            surface_id,
+            effective_rect,
+            &effective_tokens,
+            &theme,
+        );
         ui.painter().set(bg_idx, Shape::Vec(shapes));
 
         InnerResponse::new(prepared.inner, response)

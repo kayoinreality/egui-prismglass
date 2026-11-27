@@ -1,23 +1,30 @@
-//! Pure-`egui` 3D-beveled Apple glassmorphism, solid minimal renderer, and sculpted volumetric backdrop.
+//! Pure-`egui` 3D-beveled Apple glassmorphism, solid minimal renderer, tactile micro-grain,
+//! and sculpted volumetric backdrop painter.
 //!
-//! Renders crisp, modern surfaces with zero custom GPU shaders:
+//! Renders crisp, modern surfaces with zero custom GPU shaders (used as the universal
+//! fallback when GPU backdrop blur is disabled or unavailable):
 //! - **Glass mode (`SurfaceStyle::Glass`)**:
-//!   1. Grounded 3D elevation shadow.
-//!   2. Clean smoked/frosted translucent glass body (no 2000s glossy dome).
-//!   3. Machined 1px directional 3D rim-lit bevel (brighter top-left key light, subtle bounce rim).
-//!   4. Delicate 1px inset inner glass thickness edge.
+//!   1. Dual-layer 3D shadow (wide ambient float shadow + tight contact occlusion shadow).
+//!   2. Clean smoked/frosted translucent glass body.
+//!   3. Subtle tiled procedural frost micro-grain texture (`128x128` cached once per context).
+//!   4. Delicate `1px` inset inner glass thickness edge.
+//!   5. Machined `1px` directional 3D rim-lit bevel (bright top-left key light, subtle bounce rim).
 //! - **Minimal mode (`SurfaceStyle::Minimal`)**:
-//!   Fast opaque solid rounded rectangles with razor-sharp 1px neutral hairline borders.
+//!   Fast opaque solid rounded rectangles with razor-sharp `1px` neutral hairline borders.
 
 use std::f32::consts::{FRAC_PI_2, PI, TAU};
 
 use egui::epaint::{Mesh, Vertex, WHITE_UV};
-use egui::{Color32, CornerRadius, Painter, Pos2, Rect, Shape, Stroke, StrokeKind, pos2, vec2};
+use egui::{
+    Color32, ColorImage, Context, CornerRadius, Id, Painter, Pos2, Rect, Shape, Stroke, StrokeKind,
+    TextureHandle, TextureOptions, TextureWrapMode, Ui, pos2, vec2,
+};
 
 use crate::theme::{PrismTheme, SurfaceStyle, ThemeMode};
-use crate::tokens::{GlassSurfaceTokens, blend_colors, scale_alpha};
+use crate::tokens::{BackdropScene, GlassSurfaceTokens, blend_colors, scale_alpha};
 
 const CORNER_SEGMENTS: usize = 8;
+const GRAIN_TEXTURE_ID: &str = "egui_prismglass_frost_grain_tex";
 
 /// Paints a complete fallback glass (or solid minimal) surface using [`GlassSurfaceTokens`].
 pub fn paint_glass_surface(painter: &Painter, rect: Rect, tokens: &GlassSurfaceTokens) {
@@ -28,11 +35,55 @@ pub fn paint_glass_surface(painter: &Painter, rect: Rect, tokens: &GlassSurfaceT
 }
 
 /// Builds the complete list of [`egui::Shape`]s for a 3D-beveled glass or solid minimal surface.
-///
-/// Useful for immediate-mode containers that reserve a [`egui::layers::ShapeIdx`]
-/// placeholder before laying out their children and then fill it with
-/// `painter.set(idx, Shape::Vec(glass_surface_shapes(rect, tokens)))`.
 pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shape> {
+    build_surface_shapes(rect, tokens, None)
+}
+
+/// Builds fallback glass surface shapes with cached procedural frost micro-grain texture.
+pub fn glass_surface_shapes_with_ctx(
+    ctx: &Context,
+    rect: Rect,
+    tokens: &GlassSurfaceTokens,
+) -> Vec<Shape> {
+    let grain_tex = if tokens.grain_intensity > 0.002
+        && !(tokens.gradient_top == tokens.gradient_bottom && tokens.gradient_top == tokens.tint)
+    {
+        Some(get_or_create_grain_texture(ctx))
+    } else {
+        None
+    };
+    build_surface_shapes(rect, tokens, grain_tex.as_ref())
+}
+
+/// Builds only the 3D elevation shadows and machined directional bevel overlay (without body fill).
+///
+/// Used by grab-pass GPU blur backends (`blur-glow`) that composite the blurred frosted body
+/// directly into the framebuffer and layer `egui-prismglass`'s 3D bevel cleanly on top.
+pub fn glass_bevel_and_shadow_shapes(
+    rect: Rect,
+    tokens: &GlassSurfaceTokens,
+    include_shadows: bool,
+) -> Vec<Shape> {
+    if !rect.is_positive() {
+        return Vec::new();
+    }
+    let mut shapes = Vec::with_capacity(8);
+    let max_r = (rect.width().min(rect.height()) * 0.5).max(0.0);
+    let r = tokens.corner_radius.min(max_r);
+    let corner_radius = CornerRadius::same(r.round().clamp(0.0, 255.0) as u8);
+
+    if include_shadows {
+        push_shadow_shapes(&mut shapes, rect, corner_radius, tokens);
+    }
+    push_bevel_shapes(&mut shapes, rect, r, tokens);
+    shapes
+}
+
+fn build_surface_shapes(
+    rect: Rect,
+    tokens: &GlassSurfaceTokens,
+    grain_tex: Option<&TextureHandle>,
+) -> Vec<Shape> {
     if !rect.is_positive() {
         return Vec::new();
     }
@@ -42,10 +93,8 @@ pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shap
     let r = tokens.corner_radius.min(max_r);
     let corner_radius = CornerRadius::same(r.round().clamp(0.0, 255.0) as u8);
 
-    // 1. Grounded 3D elevation shadow.
-    if tokens.shadow != egui::Shadow::NONE {
-        shapes.push(Shape::from(tokens.shadow.as_shape(rect, corner_radius)));
-    }
+    // 1. Dual-layer 3D shadow (ambient float + tight contact occlusion).
+    push_shadow_shapes(&mut shapes, rect, corner_radius, tokens);
 
     let is_solid_minimal =
         tokens.gradient_top == tokens.gradient_bottom && tokens.gradient_top == tokens.tint;
@@ -64,7 +113,6 @@ pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shap
         return shapes;
     }
 
-    // Smoked/frosted translucent glass fill (subtle depth gradient, zero glossy dome).
     let fill_mesh = rounded_rect_gradient_mesh(
         rect,
         r,
@@ -74,7 +122,45 @@ pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shap
     );
     shapes.push(Shape::mesh(fill_mesh));
 
-    // 3. Inner 1px thickness bevel (subtle top-biased light catch inside the glass pane).
+    // 3. Subtle procedural micro-grain overlay for tactile frosted-glass feel.
+    if let Some(tex) = grain_tex {
+        let grain_alpha = (tokens.grain_intensity * 255.0 * 0.85)
+            .round()
+            .clamp(0.0, 28.0) as u8;
+        if grain_alpha > 0 {
+            let grain_mesh = rounded_rect_tiled_grain_mesh(
+                rect,
+                r,
+                tex.id(),
+                Color32::from_rgba_unmultiplied(255, 255, 255, grain_alpha),
+            );
+            shapes.push(Shape::mesh(grain_mesh));
+        }
+    }
+
+    // 4. Inner thickness edge + directional 3D rim-lit perimeter bevel.
+    push_bevel_shapes(&mut shapes, rect, r, tokens);
+
+    shapes
+}
+
+fn push_shadow_shapes(
+    shapes: &mut Vec<Shape>,
+    rect: Rect,
+    corner_radius: CornerRadius,
+    tokens: &GlassSurfaceTokens,
+) {
+    if tokens.shadow != egui::Shadow::NONE {
+        shapes.push(Shape::from(tokens.shadow.as_shape(rect, corner_radius)));
+    }
+    if tokens.contact_shadow != egui::Shadow::NONE {
+        shapes.push(Shape::from(
+            tokens.contact_shadow.as_shape(rect, corner_radius),
+        ));
+    }
+}
+
+fn push_bevel_shapes(shapes: &mut Vec<Shape>, rect: Rect, r: f32, tokens: &GlassSurfaceTokens) {
     if tokens.inner_glow.a() > 0 && rect.width() > 6.0 && rect.height() > 6.0 {
         let inset_rect = rect.shrink(1.0);
         let inner_radius = (r - 1.0).max(0.0);
@@ -89,7 +175,6 @@ pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shap
         shapes.push(Shape::mesh(inner_rim));
     }
 
-    // 4. Directional 3D rim-lit perimeter bevel (bright machined top-left edge, deep bottom-right).
     if tokens.border_width > 0.0 && (tokens.border.a() > 0 || tokens.specular_top.a() > 0) {
         let key_col = if tokens.specular_top.a() > 0 {
             blend_colors(
@@ -112,8 +197,6 @@ pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shap
         );
         shapes.push(Shape::mesh(rim_mesh));
     }
-
-    shapes
 }
 
 /// Paints a clean pill or rounded-rect button surface (flat or subtly frosted, never glossy).
@@ -159,12 +242,36 @@ pub fn paint_glass_gradient_fill(
     }
 }
 
-/// Paints the canvas backdrop for a [`PrismTheme`].
-///
-/// - In [`SurfaceStyle::Glass`] mode: paints sculpted 3D volumetric studio light waves
-///   over deep obsidian (dark mode) or airy frost (light mode) — zero wireframe circles
-///   and zero harsh blobs.
-/// - In [`SurfaceStyle::Minimal`] mode: paints an ultra-clean solid flat canvas.
+/// Paints the canvas backdrop via the active GPU [`crate::BackdropBlurProvider`] when available
+/// and enabled, falling back seamlessly to [`paint_prism_backdrop`] otherwise.
+pub fn paint_prism_backdrop_ui(
+    ui: &Ui,
+    rect: Rect,
+    theme: &PrismTheme,
+    time_secs: f32,
+    orb_intensity: f32,
+) {
+    if !rect.is_positive() {
+        return;
+    }
+
+    if theme.surface_style == SurfaceStyle::Minimal {
+        ui.painter()
+            .rect_filled(rect, CornerRadius::ZERO, theme.palette.canvas);
+        return;
+    }
+
+    if theme.real_blur_enabled
+        && let Some(provider) = crate::blur::blur_provider(ui.ctx())
+        && provider.render_backdrop(ui, rect, theme, time_secs, orb_intensity)
+    {
+        return;
+    }
+
+    paint_prism_backdrop(ui.painter(), rect, theme, time_secs, orb_intensity);
+}
+
+/// Paints the canvas backdrop for a [`PrismTheme`] using pure `egui` primitives.
 pub fn paint_prism_backdrop(
     painter: &Painter,
     rect: Rect,
@@ -181,7 +288,6 @@ pub fn paint_prism_backdrop(
         return;
     }
 
-    // Smooth atmospheric base gradient.
     let mid = blend_colors(theme.palette.canvas, theme.palette.canvas_secondary, 0.5);
     let bg_mesh = rounded_rect_gradient_mesh(
         rect,
@@ -201,9 +307,8 @@ pub fn paint_prism_backdrop(
     let height = rect.height();
     let phase = time_secs * 0.35;
 
-    match theme.mode {
-        ThemeMode::Light => {
-            // Keep Frost Light airy, soft, and studio-clean with subtle sculpted light waves.
+    match (theme.mode, theme.backdrop_scene) {
+        (ThemeMode::Light, BackdropScene::SculptedWaves) => {
             paint_radial_glow_orb(
                 painter,
                 pos2(rect.min.x + width * 0.78, rect.min.y + height * 0.18),
@@ -230,9 +335,34 @@ pub fn paint_prism_backdrop(
                 },
             );
         }
-        ThemeMode::Dark => {
-            // Modern Apple Pro / Studio 3D sculpted volumetric light folds over deep carbon black.
-            // Ambient soft volumetric depth wash behind the folds.
+        (ThemeMode::Light, BackdropScene::LiquidPrism) => {
+            paint_radial_glow_orb(
+                painter,
+                pos2(rect.min.x + width * 0.22, rect.min.y + height * 0.25),
+                width.max(height) * 0.42,
+                scale_alpha(Color32::from_rgb(56, 146, 255), 0.26 * intensity),
+            );
+            paint_radial_glow_orb(
+                painter,
+                pos2(rect.min.x + width * 0.76, rect.min.y + height * 0.64),
+                width.max(height) * 0.44,
+                scale_alpha(Color32::from_rgb(122, 108, 252), 0.22 * intensity),
+            );
+            paint_sculpted_light_wave(
+                painter,
+                rect,
+                WaveSpec {
+                    y_start: 0.80,
+                    y_end: 0.16,
+                    amplitude: 0.14,
+                    phase,
+                    half_width: height * 0.22,
+                    core_color: scale_alpha(Color32::from_rgb(50, 121, 249), 0.24 * intensity),
+                    mid_color: scale_alpha(Color32::from_rgb(112, 186, 255), 0.16 * intensity),
+                },
+            );
+        }
+        (ThemeMode::Dark, BackdropScene::SculptedWaves) => {
             paint_radial_glow_orb(
                 painter,
                 pos2(
@@ -251,8 +381,6 @@ pub fn paint_prism_backdrop(
                 width.max(height) * 0.42,
                 scale_alpha(theme.palette.orb_primary, 0.11 * intensity),
             );
-
-            // Primary 3D sculpted volumetric ribbon sweeping diagonally behind the smoked glass.
             paint_sculpted_light_wave(
                 painter,
                 rect,
@@ -266,8 +394,6 @@ pub fn paint_prism_backdrop(
                     mid_color: scale_alpha(theme.palette.orb_primary, 0.16 * intensity),
                 },
             );
-
-            // Secondary crisp specular titanium ridge creating layered 3D parallax depth.
             paint_sculpted_light_wave(
                 painter,
                 rect,
@@ -281,8 +407,6 @@ pub fn paint_prism_backdrop(
                     mid_color: scale_alpha(theme.palette.orb_primary, 0.10 * intensity),
                 },
             );
-
-            // Razor-delicate luminous spine along the primary 3D fold to sell physical curvature.
             paint_sculpted_light_wave(
                 painter,
                 rect,
@@ -297,7 +421,88 @@ pub fn paint_prism_backdrop(
                 },
             );
         }
+        (ThemeMode::Dark, BackdropScene::LiquidPrism) => {
+            paint_radial_glow_orb(
+                painter,
+                pos2(rect.min.x + width * 0.24, rect.min.y + height * 0.26),
+                width.max(height) * 0.46,
+                scale_alpha(Color32::from_rgb(56, 134, 255), 0.32 * intensity),
+            );
+            paint_radial_glow_orb(
+                painter,
+                pos2(rect.min.x + width * 0.76, rect.min.y + height * 0.70),
+                width.max(height) * 0.44,
+                scale_alpha(Color32::from_rgb(120, 102, 248), 0.28 * intensity),
+            );
+            paint_sculpted_light_wave(
+                painter,
+                rect,
+                WaveSpec {
+                    y_start: 0.82,
+                    y_end: 0.16,
+                    amplitude: 0.14,
+                    phase,
+                    half_width: height * 0.22,
+                    core_color: scale_alpha(Color32::from_rgb(138, 206, 255), 0.38 * intensity),
+                    mid_color: scale_alpha(Color32::from_rgb(66, 128, 255), 0.22 * intensity),
+                },
+            );
+            paint_sculpted_light_wave(
+                painter,
+                rect,
+                WaveSpec {
+                    y_start: 0.24,
+                    y_end: 0.84,
+                    amplitude: -0.12,
+                    phase: phase * 0.8 + 1.4,
+                    half_width: height * 0.16,
+                    core_color: scale_alpha(Color32::from_rgb(198, 174, 255), 0.28 * intensity),
+                    mid_color: scale_alpha(Color32::from_rgb(96, 120, 248), 0.14 * intensity),
+                },
+            );
+        }
+        (_, BackdropScene::ArchitecturalGrid) => {
+            paint_architectural_grid_fallback(painter, rect, theme, intensity);
+        }
     }
+}
+
+fn paint_architectural_grid_fallback(
+    painter: &Painter,
+    rect: Rect,
+    theme: &PrismTheme,
+    intensity: f32,
+) {
+    let step = 48.0;
+    let line_col = match theme.mode {
+        ThemeMode::Dark => Color32::from_rgba_unmultiplied(210, 224, 255, (28.0 * intensity) as u8),
+        ThemeMode::Light => Color32::from_rgba_unmultiplied(28, 36, 56, (22.0 * intensity) as u8),
+    };
+    let mut x = rect.min.x + step;
+    while x < rect.max.x {
+        painter.line_segment(
+            [pos2(x, rect.min.y), pos2(x, rect.max.y)],
+            Stroke::new(1.0, line_col),
+        );
+        x += step;
+    }
+    let mut y = rect.min.y + step;
+    while y < rect.max.y {
+        painter.line_segment(
+            [pos2(rect.min.x, y), pos2(rect.max.x, y)],
+            Stroke::new(1.0, line_col),
+        );
+        y += step;
+    }
+    paint_radial_glow_orb(
+        painter,
+        pos2(
+            rect.min.x + rect.width() * 0.72,
+            rect.min.y + rect.height() * 0.28,
+        ),
+        rect.width().max(rect.height()) * 0.36,
+        scale_alpha(theme.palette.accent, 0.30 * intensity),
+    );
 }
 
 /// Paints a soft, multi-ring Gaussian-like radial glow orb with zero hard edges.
@@ -368,7 +573,6 @@ struct WaveSpec {
     mid_color: Color32,
 }
 
-/// Paints a smooth 3D sculpted volumetric light ribbon using a 5-band parametric triangle mesh.
 fn paint_sculpted_light_wave(painter: &Painter, rect: Rect, spec: WaveSpec) {
     let steps = 44_usize;
     let width = rect.width();
@@ -382,7 +586,6 @@ fn paint_sculpted_light_wave(painter: &Painter, rect: Rect, spec: WaveSpec) {
         pos2(x, y)
     };
 
-    // 5 transverse offsets across the ribbon: outer -> shoulder -> crisp 3D ridge -> shoulder -> outer.
     let offsets = [-1.0_f32, -0.34, 0.0, 0.34, 1.0];
     let mut mesh = Mesh::default();
 
@@ -394,9 +597,7 @@ fn paint_sculpted_light_wave(painter: &Painter, rect: Rect, spec: WaveSpec) {
         let tangent = (next - prev).normalized();
         let normal = vec2(-tangent.y, tangent.x);
 
-        // Smooth fade at both ends of the sweeping ribbon.
         let end_fade = (t * PI).sin().powf(0.55);
-        // Subtle width modulation along the wave for organic 3D ribbon perspective.
         let local_hw = spec.half_width * (0.72 + 0.42 * (t * PI * 1.2 + 0.4).sin().abs());
 
         let band_colors = [
@@ -433,10 +634,6 @@ fn paint_sculpted_light_wave(painter: &Painter, rect: Rect, spec: WaveSpec) {
     painter.add(Shape::mesh(mesh));
 }
 
-/// Builds a 1px directional 3D rim-lit perimeter ring mesh around a rounded rectangle.
-///
-/// Simulates a studio overhead top-left key light (`normalize(-0.42, -0.90)`) catching
-/// machined glass bevel edges, transitioning smoothly into subtle side and bottom-right rims.
 fn directional_bevel_ring_mesh(
     rect: Rect,
     radius: f32,
@@ -493,7 +690,6 @@ fn directional_bevel_ring_mesh(
     mesh
 }
 
-/// Builds a rounded-rectangle triangle-fan mesh with clean, subtle vertical depth tint.
 fn rounded_rect_gradient_mesh(
     rect: Rect,
     radius: f32,
@@ -505,7 +701,6 @@ fn rounded_rect_gradient_mesh(
     let mut mesh = Mesh::default();
 
     let height = rect.height().max(1.0);
-
     let sample_color = |point: Pos2| -> Color32 {
         let mix = ((point.y - rect.min.y) / height).clamp(0.0, 1.0);
         if mix < 0.5 {
@@ -539,6 +734,72 @@ fn rounded_rect_gradient_mesh(
     }
 
     mesh
+}
+
+fn rounded_rect_tiled_grain_mesh(
+    rect: Rect,
+    radius: f32,
+    texture_id: egui::TextureId,
+    tint: Color32,
+) -> Mesh {
+    let perimeter = rounded_rect_perimeter(rect, radius, CORNER_SEGMENTS);
+    let mut mesh = Mesh::with_texture(texture_id);
+    let tile = 96.0;
+
+    let uv_of = |p: Pos2| pos2(p.x / tile, p.y / tile);
+    let center = rect.center();
+    mesh.vertices.push(Vertex {
+        pos: center,
+        uv: uv_of(center),
+        color: tint,
+    });
+    for &p in &perimeter {
+        mesh.vertices.push(Vertex {
+            pos: p,
+            uv: uv_of(p),
+            color: tint,
+        });
+    }
+    let n = perimeter.len();
+    for i in 0..n {
+        let next = (i + 1) % n;
+        mesh.indices.push(0);
+        mesh.indices.push((1 + i) as u32);
+        mesh.indices.push((1 + next) as u32);
+    }
+    mesh
+}
+
+fn get_or_create_grain_texture(ctx: &Context) -> TextureHandle {
+    let key = Id::NULL.with(GRAIN_TEXTURE_ID);
+    if let Some(handle) = ctx.data(|d| d.get_temp::<TextureHandle>(key)) {
+        return handle;
+    }
+
+    // Deterministic monochrome fine-grain texture (128x128) generated once per context.
+    let size = 128_usize;
+    let mut pixels = Vec::with_capacity(size * size);
+    for y in 0..size {
+        for x in 0..size {
+            // Fast 2D integer hash -> uniform grain in [96..255].
+            let mut h = (x as u32).wrapping_mul(374_761_393) ^ (y as u32).wrapping_mul(668_265_263);
+            h = (h ^ (h >> 13)).wrapping_mul(1_274_126_177);
+            let v = ((h ^ (h >> 16)) & 0xFF) as u8;
+            let lum = 120 + (v / 2);
+            pixels.push(Color32::from_rgba_unmultiplied(lum, lum, lum, v));
+        }
+    }
+
+    let image = ColorImage::new([size, size], pixels);
+    let options = TextureOptions {
+        magnification: egui::TextureFilter::Linear,
+        minification: egui::TextureFilter::Linear,
+        wrap_mode: TextureWrapMode::Repeat,
+        mipmap_mode: None,
+    };
+    let handle = ctx.load_texture("prismglass_frost_grain", image, options);
+    ctx.data_mut(|d| d.insert_temp(key, handle.clone()));
+    handle
 }
 
 fn rounded_rect_perimeter(rect: Rect, radius: f32, corner_segments: usize) -> Vec<Pos2> {
