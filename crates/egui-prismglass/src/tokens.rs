@@ -37,6 +37,13 @@ pub enum BackdropScene {
     LiquidPrism,
     /// High-contrast architectural rings and precision light beams (ideal for inspecting real blur & refraction).
     ArchitecturalGrid,
+    /// Clean, distraction-free architectural studio gradient with no diagonal bars, waves, or grid.
+    /// Ideal for pro workstations, streaming studios, DAWs, and video editors.
+    StudioNeutral,
+    /// Disables the procedural backdrop completely. `paint_prism_backdrop_ui` becomes a no-op and
+    /// `blur-wgpu` automatically switches glass surfaces to real GPU alpha-blended translucent
+    /// overlays over live `egui` content unless an external GPU/RGBA8 backdrop is installed.
+    None,
 }
 
 impl BackdropScene {
@@ -46,6 +53,8 @@ impl BackdropScene {
             Self::SculptedWaves => "3D Waves",
             Self::LiquidPrism => "Liquid Prism",
             Self::ArchitecturalGrid => "Studio Grid",
+            Self::StudioNeutral => "Studio Neutral",
+            Self::None => "None",
         }
     }
 
@@ -55,6 +64,8 @@ impl BackdropScene {
             Self::SculptedWaves => 0,
             Self::LiquidPrism => 1,
             Self::ArchitecturalGrid => 2,
+            Self::StudioNeutral => 3,
+            Self::None => 4,
         }
     }
 }

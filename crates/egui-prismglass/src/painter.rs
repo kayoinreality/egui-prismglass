@@ -36,7 +36,7 @@ pub fn paint_glass_surface(painter: &Painter, rect: Rect, tokens: &GlassSurfaceT
 
 /// Builds the complete list of [`egui::Shape`]s for a 3D-beveled glass or solid minimal surface.
 pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shape> {
-    build_surface_shapes(rect, tokens, None)
+    build_surface_shapes(rect, tokens, None, false)
 }
 
 /// Builds fallback glass surface shapes with cached procedural frost micro-grain texture.
@@ -52,7 +52,26 @@ pub fn glass_surface_shapes_with_ctx(
     } else {
         None
     };
-    build_surface_shapes(rect, tokens, grain_tex.as_ref())
+    build_surface_shapes(rect, tokens, grain_tex.as_ref(), false)
+}
+
+/// Builds translucent overlay glass shapes for CPU fallback mode using exterior-only shadows
+/// so live `egui` content behind the card shines through cleanly without interior shadow darkening.
+pub(crate) fn glass_overlay_surface_shapes_with_ctx(
+    ctx: &Context,
+    rect: Rect,
+    tokens: &GlassSurfaceTokens,
+) -> Vec<Shape> {
+    let translucent = tokens.resolved_for_real_blur();
+    let grain_tex = if translucent.grain_intensity > 0.002
+        && !(translucent.gradient_top == translucent.gradient_bottom
+            && translucent.gradient_top == translucent.tint)
+    {
+        Some(get_or_create_grain_texture(ctx))
+    } else {
+        None
+    };
+    build_surface_shapes(rect, &translucent, grain_tex.as_ref(), true)
 }
 
 /// Builds only the 3D elevation shadows and machined directional bevel overlay (without body fill).
@@ -83,6 +102,7 @@ fn build_surface_shapes(
     rect: Rect,
     tokens: &GlassSurfaceTokens,
     grain_tex: Option<&TextureHandle>,
+    exterior_only_shadow: bool,
 ) -> Vec<Shape> {
     if !rect.is_positive() {
         return Vec::new();
@@ -93,8 +113,25 @@ fn build_surface_shapes(
     let r = tokens.corner_radius.min(max_r);
     let corner_radius = CornerRadius::same(r.round().clamp(0.0, 255.0) as u8);
 
-    // 1. Dual-layer 3D shadow (ambient float + tight contact occlusion).
-    push_shadow_shapes(&mut shapes, rect, corner_radius, tokens);
+    // 1. Elevation shadow (exterior-only for translucent overlays, dual-layer for opaque/backdrop cards).
+    if exterior_only_shadow {
+        if tokens.shadow != egui::Shadow::NONE || tokens.contact_shadow != egui::Shadow::NONE {
+            shapes.push(Shape::rect_stroke(
+                rect,
+                corner_radius,
+                Stroke::new(6.0, Color32::from_rgba_unmultiplied(0, 0, 0, 22)),
+                StrokeKind::Outside,
+            ));
+            shapes.push(Shape::rect_stroke(
+                rect,
+                corner_radius,
+                Stroke::new(2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 44)),
+                StrokeKind::Outside,
+            ));
+        }
+    } else {
+        push_shadow_shapes(&mut shapes, rect, corner_radius, tokens);
+    }
 
     let is_solid_minimal =
         tokens.gradient_top == tokens.gradient_bottom && tokens.gradient_top == tokens.tint;
@@ -261,6 +298,10 @@ pub fn paint_prism_backdrop_ui(
         return;
     }
 
+    if theme.backdrop_scene == BackdropScene::None {
+        return;
+    }
+
     if theme.real_blur_enabled
         && let Some(provider) = crate::blur::blur_provider(ui.ctx())
         && provider.render_backdrop(ui, rect, theme, time_secs, orb_intensity)
@@ -285,6 +326,10 @@ pub fn paint_prism_backdrop(
 
     if theme.surface_style == SurfaceStyle::Minimal {
         painter.rect_filled(rect, CornerRadius::ZERO, theme.palette.canvas);
+        return;
+    }
+
+    if theme.backdrop_scene == BackdropScene::None {
         return;
     }
 
@@ -464,6 +509,7 @@ pub fn paint_prism_backdrop(
         (_, BackdropScene::ArchitecturalGrid) => {
             paint_architectural_grid_fallback(painter, rect, theme, intensity);
         }
+        (_, BackdropScene::StudioNeutral | BackdropScene::None) => {}
     }
 }
 

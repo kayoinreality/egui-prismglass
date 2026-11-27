@@ -31,6 +31,7 @@ pub struct GlassCard {
     interactive: bool,
     fill_width: bool,
     min_height: Option<f32>,
+    translucent_overlay: bool,
 }
 
 impl Default for GlassCard {
@@ -52,6 +53,7 @@ impl GlassCard {
             interactive: false,
             fill_width: false,
             min_height: None,
+            translucent_overlay: false,
         }
     }
 
@@ -106,6 +108,14 @@ impl GlassCard {
     /// Enforces a minimum height for the card's inner layout.
     pub fn min_height(mut self, height: f32) -> Self {
         self.min_height = Some(height);
+        self
+    }
+
+    /// Renders this card as a real GPU alpha-blended translucent glass overlay so live `egui`
+    /// content behind it (such as a video canvas, 3D viewport, or underlying panels) remains
+    /// genuinely visible through the glass surface.
+    pub fn translucent_overlay(mut self, enabled: bool) -> Self {
+        self.translucent_overlay = enabled;
         self
     }
 
@@ -183,12 +193,13 @@ impl GlassCard {
             effective_rect.min.x as i32,
             effective_rect.min.y as i32,
         ));
-        let shapes = crate::blur::resolve_glass_surface_shapes(
+        let shapes = crate::blur::resolve_glass_surface_shapes_with_overlay(
             ui,
             surface_id,
             effective_rect,
             &effective_tokens,
             &theme,
+            self.translucent_overlay,
         );
         ui.painter().set(bg_idx, Shape::Vec(shapes));
 

@@ -1210,3 +1210,232 @@ fn intermediate_texture_reuse_and_static_pyramid_caching() {
     assert_eq!(m3.last_frame_card_count, 40);
     assert_eq!(m3.pyramid_cache_hits, 12);
 }
+
+// ---------------------------------------------------------------------------
+// 7. Live-Content Transparency, Overlay Glass, Sub-Rect Stage Blur & Neutral Studio
+// ---------------------------------------------------------------------------
+
+#[test]
+fn glass_without_backdrop_is_transparent_over_live_egui_stage() {
+    let width = 320u32;
+    let height = 220u32;
+    let provider_slot: Arc<Mutex<Option<Arc<WgpuBlurProvider>>>> = Arc::new(Mutex::new(None));
+    let provider_ui = provider_slot.clone();
+
+    let _gpu = lock_gpu();
+    let mut harness = Harness::builder()
+        .with_size(vec2(width as f32, height as f32))
+        .with_pixels_per_point(1.0)
+        .build_ui(move |ui| {
+            let theme = PrismTheme::glacial().with_backdrop_scene(BackdropScene::None);
+            ui.ctx().set_prism_theme(theme);
+
+            let mut slot = provider_ui.lock().expect("lock");
+            if slot.is_none() {
+                *slot = Some(egui_prismglass::blur_wgpu::install_with_format(
+                    ui.ctx(),
+                    TextureFormat::Rgba8Unorm,
+                ));
+            }
+            drop(slot);
+
+            // Simulate a streaming studio canvas (like PrismCast) WITHOUT paint_prism_backdrop_ui:
+            // dark neutral chrome + pitch-black 16:9 Stage with a bright crimson lower band!
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0.0, Color32::from_rgb(16, 18, 24));
+            let stage = Rect::from_min_max(pos2(80.0, 20.0), pos2(300.0, 200.0));
+            ui.painter().rect_filled(stage, 0.0, Color32::BLACK);
+            let crimson_band = Rect::from_min_max(pos2(80.0, 120.0), pos2(300.0, 200.0));
+            ui.painter()
+                .rect_filled(crimson_band, 0.0, Color32::from_rgb(235, 32, 64));
+
+            // Floating GlassCard navigation menu overlapping both the black & crimson Stage halves!
+            Area::new(Id::NULL.with("prismcast_nav_overlay"))
+                .fixed_pos(pos2(24.0, 36.0))
+                .show(ui.ctx(), |ui| {
+                    GlassCard::new()
+                        .elevation(GlassElevation::Floating)
+                        .padding(Margin::same(0))
+                        .show(ui, |ui| {
+                            ui.allocate_exact_size(vec2(140.0, 148.0), egui::Sense::hover());
+                        });
+                });
+        });
+
+    harness.step();
+    harness.step();
+    let img = harness.render().expect("no-backdrop overlay render");
+
+    let metrics = provider_slot
+        .lock()
+        .expect("lock")
+        .as_ref()
+        .expect("provider")
+        .metrics();
+    // Zero pyramid allocations & zero blur passes when no backdrop is painted!
+    assert_eq!(metrics.pyramid_allocations, 0);
+    assert_eq!(metrics.pyramid_passes_executed, 0);
+    assert_eq!(metrics.estimated_vram_bytes, 0);
+
+    // Inside the floating card over the BLACK stage region (x=96..150, y=52..104):
+    // must remain dark (no opaque bright-blue phantom diagonal bar!).
+    let [blk_r, blk_g, blk_b] = mean_rgb(&img, 96, 52, 54, 52);
+    // Inside the SAME floating card over the CRIMSON stage region (x=96..150, y=132..172):
+    // crimson must shine genuinely through the translucent glass!
+    let [red_r, red_g, red_b] = mean_rgb(&img, 96, 132, 54, 40);
+
+    assert!(
+        blk_r < 45.0 && blk_g < 55.0 && blk_b < 85.0,
+        "glass over black stage without backdrop must stay dark translucent (rgb=[{blk_r:.1}, {blk_g:.1}, {blk_b:.1}])"
+    );
+    assert!(
+        red_r > blk_r + 90.0 && red_r > red_g * 2.0 && red_r > red_b * 1.4,
+        "live crimson stage content behind floating glass must shine through via real alpha blending (red=[{red_r:.1},{red_g:.1},{red_b:.1}], black=[{blk_r:.1},{blk_g:.1},{blk_b:.1}])"
+    );
+}
+
+#[test]
+fn translucent_overlay_card_reveals_live_stage_over_studio_backdrop() {
+    let width = 320u32;
+    let height = 220u32;
+
+    let _gpu = lock_gpu();
+    let mut installed = false;
+    let mut harness = Harness::builder()
+        .with_size(vec2(width as f32, height as f32))
+        .with_pixels_per_point(1.0)
+        .build_ui(move |ui| {
+            let theme = PrismTheme::glacial().with_backdrop_scene(BackdropScene::StudioNeutral);
+            ui.ctx().set_prism_theme(theme.clone());
+            if !installed {
+                egui_prismglass::blur_wgpu::install_with_format(
+                    ui.ctx(),
+                    TextureFormat::Rgba8Unorm,
+                );
+                installed = true;
+            }
+
+            paint_prism_backdrop_ui(ui, ui.max_rect(), &theme, 0.0, 1.0);
+
+            // Live bright emerald stage painted in egui directly on top of the studio backdrop.
+            let stage = Rect::from_min_max(pos2(90.0, 24.0), pos2(300.0, 196.0));
+            ui.painter()
+                .rect_filled(stage, 0.0, Color32::from_rgb(16, 220, 128));
+
+            // Floating menu explicitly marked `.translucent_overlay(true)` overlapping the stage!
+            Area::new(Id::NULL.with("explicit_overlay_menu"))
+                .fixed_pos(pos2(40.0, 44.0))
+                .show(ui.ctx(), |ui| {
+                    GlassCard::new()
+                        .elevation(GlassElevation::Floating)
+                        .translucent_overlay(true)
+                        .padding(Margin::same(0))
+                        .show(ui, |ui| {
+                            ui.allocate_exact_size(vec2(140.0, 130.0), egui::Sense::hover());
+                        });
+                });
+        });
+
+    harness.step();
+    harness.step();
+    let img = harness.render().expect("explicit translucent overlay");
+
+    // Left strip of card (x=50..80) sits over dark StudioNeutral backdrop;
+    // Right strip of card (x=104..164) overlaps the live bright emerald egui Stage!
+    let [_lr, lg, _lb] = mean_rgb(&img, 50, 64, 30, 80);
+    let [rr, rg, rb] = mean_rgb(&img, 104, 64, 60, 80);
+
+    assert!(
+        rg > lg + 85.0 && rg > rr * 1.8 && rg > rb * 1.15,
+        "translucent_overlay(true) must reveal live emerald stage through glass (stage_rgb=[{rr:.1},{rg:.1},{rb:.1}], left_g={lg:.1})"
+    );
+}
+
+#[test]
+fn external_backdrop_region_blurs_stage_at_exact_coordinates() {
+    let width = 320u32;
+    let height = 200u32;
+    let stage_rect = Rect::from_min_max(pos2(120.0, 20.0), pos2(300.0, 180.0));
+    let stage_rgba = build_solid_rgba8(64, 64, [245, 190, 24, 255]); // vivid studio amber video frame
+
+    let _gpu = lock_gpu();
+    let mut installed = false;
+    let mut harness = Harness::builder()
+        .with_size(vec2(width as f32, height as f32))
+        .with_pixels_per_point(1.0)
+        .build_ui(move |ui| {
+            let theme = PrismTheme::onyx().with_backdrop_scene(BackdropScene::None);
+            ui.ctx().set_prism_theme(theme.clone());
+            if !installed {
+                let provider = egui_prismglass::blur_wgpu::install_with_format(
+                    ui.ctx(),
+                    TextureFormat::Rgba8Unorm,
+                );
+                provider.set_external_backdrop_rgba8(64, 64, stage_rgba.clone());
+                provider.set_external_backdrop_region(Some(stage_rect));
+                installed = true;
+            }
+
+            // Host draws its own dark chrome + amber stage without paint_prism_backdrop_ui!
+            ui.painter()
+                .rect_filled(ui.max_rect(), 0.0, theme.palette.canvas);
+            ui.painter()
+                .rect_filled(stage_rect, 0.0, Color32::from_rgb(245, 190, 24));
+
+            // Real GPU Dual-Kawase glass card straddling the left edge of the 16:9 Stage!
+            Area::new(Id::NULL.with("stage_straddle_card"))
+                .fixed_pos(pos2(40.0, 40.0))
+                .show(ui.ctx(), |ui| {
+                    GlassCard::new()
+                        .elevation(GlassElevation::Floating)
+                        .padding(Margin::same(0))
+                        .show(ui, |ui| {
+                            ui.allocate_exact_size(vec2(170.0, 120.0), egui::Sense::hover());
+                        });
+                });
+        });
+
+    harness.step();
+    harness.step();
+    let img = harness.render().expect("sub-rect stage blur render");
+
+    // Left inside card (x=54..96) is outside stage_rect -> blurs dark neutral Onyx canvas.
+    let [left_r, left_g, _left_b] = mean_rgb(&img, 54, 65, 42, 70);
+    // Right inside card (x=148..196) is inside stage_rect -> blurs vivid amber Stage video!
+    let [right_r, right_g, right_b] = mean_rgb(&img, 148, 65, 48, 70);
+
+    assert!(
+        left_r < 55.0 && left_g < 55.0,
+        "region outside external stage rect should blur neutral canvas (left_rgb=[{left_r:.1}, {left_g:.1}])"
+    );
+    assert!(
+        right_r > left_r + 65.0 && right_g > left_g + 45.0 && right_r > right_b * 1.4,
+        "region inside external stage rect should blur live amber stage at exact coordinates (right_rgb=[{right_r:.1}, {right_g:.1}, {right_b:.1}], left_r={left_r:.1})"
+    );
+}
+
+#[test]
+fn studio_neutral_scene_has_no_diagonal_bar_artifacts() {
+    let neutral_img = render_fixture(
+        320,
+        200,
+        1.0,
+        PrismTheme::glacial().with_backdrop_scene(BackdropScene::StudioNeutral),
+        |_, _| {},
+    );
+    let silk_img = render_fixture(
+        320,
+        200,
+        1.0,
+        PrismTheme::glacial().with_backdrop_scene(BackdropScene::SculptedWaves),
+        |_, _| {},
+    );
+
+    let neutral_var = luma_variance(&neutral_img, 16, 16, 288, 168);
+    let silk_var = luma_variance(&silk_img, 16, 16, 288, 168);
+
+    assert!(
+        neutral_var < 80.0 && silk_var > neutral_var * 8.0,
+        "StudioNeutral must be calm and free of high-contrast diagonal bars (neutral_var={neutral_var:.1}, silk_var={silk_var:.1})"
+    );
+}

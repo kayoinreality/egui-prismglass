@@ -18,6 +18,7 @@ pub struct GlassPanel {
     tint_override: Option<Color32>,
     fill_width: bool,
     min_height: Option<f32>,
+    translucent_overlay: bool,
 }
 
 impl Default for GlassPanel {
@@ -36,6 +37,7 @@ impl GlassPanel {
             tint_override: None,
             fill_width: true,
             min_height: None,
+            translucent_overlay: false,
         }
     }
 
@@ -72,6 +74,12 @@ impl GlassPanel {
     /// Sets an optional minimum height for the panel body.
     pub fn min_height(mut self, height: f32) -> Self {
         self.min_height = Some(height);
+        self
+    }
+
+    /// Renders this panel as a real GPU alpha-blended translucent overlay over live `egui` content.
+    pub fn translucent_overlay(mut self, enabled: bool) -> Self {
+        self.translucent_overlay = enabled;
         self
     }
 
@@ -113,8 +121,14 @@ impl GlassPanel {
         let rect = prepared.response.rect;
         let surface_id =
             ui.make_persistent_id(("prism_panel_surface", rect.min.x as i32, rect.min.y as i32));
-        let shapes =
-            crate::blur::resolve_glass_surface_shapes(ui, surface_id, rect, &tokens, &theme);
+        let shapes = crate::blur::resolve_glass_surface_shapes_with_overlay(
+            ui,
+            surface_id,
+            rect,
+            &tokens,
+            &theme,
+            self.translucent_overlay,
+        );
         ui.painter().set(bg_idx, Shape::Vec(shapes));
 
         prepared

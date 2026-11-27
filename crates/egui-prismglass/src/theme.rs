@@ -839,6 +839,14 @@ impl PrismTheme {
         theme
     }
 
+    /// Builder that selects the procedural [`BackdropScene`] (e.g. [`BackdropScene::StudioNeutral`]
+    /// or [`BackdropScene::None`]) and returns `self`.
+    #[must_use]
+    pub fn with_backdrop_scene(mut self, scene: BackdropScene) -> Self {
+        self.backdrop_scene = scene;
+        self
+    }
+
     /// Builder that applies a curated vibrant [`AccentPalette`] across the theme and returns `self`.
     #[must_use]
     pub fn with_accent_palette(mut self, accent: AccentPalette) -> Self {

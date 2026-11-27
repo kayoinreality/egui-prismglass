@@ -18,6 +18,7 @@ pub struct GlassSidebar {
     width: f32,
     padding: Option<Margin>,
     corner_radius: Option<f32>,
+    translucent_overlay: bool,
 }
 
 impl Default for GlassSidebar {
@@ -33,6 +34,7 @@ impl GlassSidebar {
             width: 220.0,
             padding: None,
             corner_radius: None,
+            translucent_overlay: false,
         }
     }
 
@@ -51,6 +53,12 @@ impl GlassSidebar {
     /// Overrides the sidebar corner radius in logical points.
     pub fn corner_radius(mut self, radius: f32) -> Self {
         self.corner_radius = Some(radius);
+        self
+    }
+
+    /// Renders this sidebar as a real GPU alpha-blended translucent overlay over live `egui` content.
+    pub fn translucent_overlay(mut self, enabled: bool) -> Self {
+        self.translucent_overlay = enabled;
         self
     }
 
@@ -88,8 +96,14 @@ impl GlassSidebar {
             rect.min.x as i32,
             rect.min.y as i32,
         ));
-        let shapes =
-            crate::blur::resolve_glass_surface_shapes(ui, surface_id, rect, &tokens, &theme);
+        let shapes = crate::blur::resolve_glass_surface_shapes_with_overlay(
+            ui,
+            surface_id,
+            rect,
+            &tokens,
+            &theme,
+            self.translucent_overlay,
+        );
         ui.painter().set(bg_idx, Shape::Vec(shapes));
 
         prepared

@@ -11,10 +11,11 @@ struct BackdropUniforms {
     orb_primary: vec4<f32>,      // linear RGB
     orb_secondary: vec4<f32>,    // linear RGB
     orb_accent: vec4<f32>,       // linear RGB
+    ext_rect_uv: vec4<f32>,      // [u_min, v_min, u_max, v_max] for optional sub-rect external texture
     screen_size: vec2<f32>,      // physical pixels
     time_secs: f32,
     intensity: f32,
-    scene_id: u32,               // 0 = Studio Silk (SculptedWaves), 1 = Liquid Prism, 2 = Architectural Grid
+    scene_id: u32,               // 0 = Studio Silk, 1 = Liquid Prism, 2 = Architectural Grid, 3 = Studio Neutral, 4 = None
     is_dark: u32,
     target_is_srgb: u32,
     _pad: u32,
@@ -227,6 +228,16 @@ fn render_architectural_grid(uv: vec2<f32>) -> vec3<f32> {
     return col;
 }
 
+// Scene 3: Studio Neutral — Distraction-free architectural studio canvas (no diagonal bars or waves).
+fn render_studio_neutral(uv: vec2<f32>) -> vec3<f32> {
+    var col = mix(u.canvas_top.rgb, u.canvas_bottom.rgb, clamp(uv.y, 0.0, 1.0));
+    let overhead = exp(-length((uv - vec2<f32>(0.5, 0.0)) * vec2<f32>(1.15, 1.9)) * 2.2);
+    let wash = select(vec3<f32>(1.0, 1.0, 1.0), u.orb_primary.rgb, u.is_dark == 1u);
+    let wash_strength = select(0.04, 0.045, u.is_dark == 1u) * u.intensity;
+    col = mix(col, wash, clamp(overhead * wash_strength, 0.0, 0.12));
+    return col;
+}
+
 @fragment
 fn fs_generate(in: VsOut) -> @location(0) vec4<f32> {
     var rgb: vec3<f32>;
@@ -234,19 +245,31 @@ fn fs_generate(in: VsOut) -> @location(0) vec4<f32> {
         rgb = render_liquid_prism(in.uv);
     } else if u.scene_id == 2u {
         rgb = render_architectural_grid(in.uv);
+    } else if u.scene_id == 3u || u.scene_id == 4u {
+        rgb = render_studio_neutral(in.uv);
     } else {
         rgb = render_studio_silk(in.uv);
     }
     return vec4<f32>(max(rgb, vec3<f32>(0.0)), 1.0);
 }
 
-// --- Screen Blit Entry Point ---
+// --- Screen Blit & External Sub-Rect Projection Entry Point ---
 @group(1) @binding(0) var src_tex: texture_2d<f32>;
 @group(1) @binding(1) var src_sampler: sampler;
 
 @fragment
 fn fs_blit(in: VsOut) -> @location(0) vec4<f32> {
-    let linear_rgb = textureSample(src_tex, src_sampler, in.uv).rgb;
+    let rect_min = u.ext_rect_uv.xy;
+    let rect_max = u.ext_rect_uv.zw;
+    let inside = all(in.uv >= rect_min) && all(in.uv <= rect_max);
+    let local_uv = clamp(
+        (in.uv - rect_min) / max(rect_max - rect_min, vec2<f32>(1e-4)),
+        vec2<f32>(0.0),
+        vec2<f32>(1.0),
+    );
+    let sampled = textureSample(src_tex, src_sampler, local_uv).rgb;
+    let neutral_bg = mix(u.canvas_top.rgb, u.canvas_bottom.rgb, clamp(in.uv.y, 0.0, 1.0));
+    let linear_rgb = select(neutral_bg, sampled, inside);
     if u.target_is_srgb == 1u {
         return vec4<f32>(max(linear_rgb, vec3<f32>(0.0)), 1.0);
     }

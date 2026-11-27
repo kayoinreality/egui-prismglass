@@ -184,6 +184,8 @@ mod tests {
         assert_eq!(BackdropScene::SculptedWaves.shader_id(), 0);
         assert_eq!(BackdropScene::LiquidPrism.shader_id(), 1);
         assert_eq!(BackdropScene::ArchitecturalGrid.shader_id(), 2);
+        assert_eq!(BackdropScene::StudioNeutral.shader_id(), 3);
+        assert_eq!(BackdropScene::None.shader_id(), 4);
     }
 
     #[test]

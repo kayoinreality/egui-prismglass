@@ -205,7 +205,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let hue_filter = mix(vec3<f32>(1.0), norm_hue, filter_strength);
 
     var color: vec3<f32>;
-    if card.flags.x == 1u {
+    var surface_alpha: f32 = 1.0;
+
+    if card.flags.z == 1u {
+        // Translucent Overlay Lens mode: composite directly over the live `egui` framebuffer
+        // via hardware ALPHA_BLENDING so underlying video stages/widgets shine through cleanly.
+        color = body_tint.rgb;
+        surface_alpha = clamp(body_tint.a * 1.35, 0.20, 0.56);
+    } else if card.flags.x == 1u {
         // Dark mode glass: preserve vibrant backdrop light while keeping interior contrast crisp for white text.
         let transmitted = vibrant * hue_filter;
         // Boost caustic refracted light slightly along the curved bevel lip (looks like glowing liquid crystal!)
@@ -225,7 +232,7 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Subtle interior dark-edge depth right inside the outer lip (gives 3D physical thickness without clouding center!)
     let inner_depth = exp(-pow((edge_dist - 4.5 * ppp) / (4.0 * ppp), 2.0)) * refract_strength;
-    if card.flags.x == 1u {
+    if card.flags.x == 1u && card.flags.z == 0u {
         color *= 1.0 - inner_depth * 0.14;
     }
 
@@ -246,7 +253,14 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
 
     // Perimeter hairline glass edge (keeps silhouette crisp against any backdrop).
     let border_mask = 1.0 - smoothstep(border_w * 0.35, border_w * 1.25, edge_dist);
-    color = mix(color, card.border.rgb, clamp(border_mask * card.border.a, 0.0, 0.95));
+    let border_a = clamp(border_mask * card.border.a, 0.0, 0.95);
+    if card.flags.z == 1u {
+        let out_a = border_a + surface_alpha * (1.0 - border_a);
+        color = (card.border.rgb * border_a + color * surface_alpha * (1.0 - border_a)) / max(out_a, 1e-4);
+        surface_alpha = out_a;
+    } else {
+        color = mix(color, card.border.rgb, border_a);
+    }
 
     // Signature Apple Liquid Glass dual-arc specular rim strictly confined to the outer 2.2px edge!
     let spec_rim = 1.0 - smoothstep(0.0, border_w * 2.1, edge_dist);
@@ -254,22 +268,41 @@ fn fs_main(in: VsOut) -> @location(0) vec4<f32> {
     let bottom_right_arc = pow(opp_dot, 2.6) * 0.72;
     let combined_arc = clamp(top_left_arc + bottom_right_arc, 0.0, 1.0);
     let spec_alpha = clamp(spec_rim * combined_arc * card.specular_top.a * 1.35, 0.0, 0.96);
-    color = mix(color, card.specular_top.rgb, spec_alpha);
+    if card.flags.z == 1u {
+        let out_a = spec_alpha + surface_alpha * (1.0 - spec_alpha);
+        color = (card.specular_top.rgb * spec_alpha + color * surface_alpha * (1.0 - spec_alpha)) / max(out_a, 1e-4);
+        surface_alpha = out_a;
+    } else {
+        color = mix(color, card.specular_top.rgb, spec_alpha);
+    }
 
     // Subtle soft Fresnel glow hugging ONLY the outer 5px curved bevel (never touches center text!).
     let bevel_halo = exp(-pow((edge_dist - border_w * 1.6) / (border_w * 2.8), 2.0));
     let halo_strength = (top_left_arc * 0.85 + bottom_right_arc * 0.65) * card.inner_glow.a;
-    color = mix(color, card.inner_glow.rgb, clamp(bevel_halo * halo_strength * 0.9, 0.0, 0.55));
+    let halo_a = clamp(bevel_halo * halo_strength * 0.9, 0.0, 0.55);
+    if card.flags.z == 1u {
+        let out_a = halo_a + surface_alpha * (1.0 - halo_a);
+        color = (card.inner_glow.rgb * halo_a + color * surface_alpha * (1.0 - halo_a)) / max(out_a, 1e-4);
+        surface_alpha = out_a;
+    } else {
+        color = mix(color, card.inner_glow.rgb, halo_a);
+    }
 
     // Prismatic edge accent sheen grazing the corner curvature.
     if prism_k > 0.01 {
         let prism_arc = pow(max(dot(normal, normalize(vec2<f32>(-0.74, -0.67))), 0.0), 3.2)
             + pow(max(dot(normal, normalize(vec2<f32>(0.74, 0.67))), 0.0), 3.6) * 0.55;
         let prism_alpha = clamp(spec_rim * prism_arc * card.specular_accent.a * prism_k, 0.0, 0.72);
-        color = mix(color, card.specular_accent.rgb, prism_alpha);
+        if card.flags.z == 1u {
+            let out_a = prism_alpha + surface_alpha * (1.0 - prism_alpha);
+            color = (card.specular_accent.rgb * prism_alpha + color * surface_alpha * (1.0 - prism_alpha)) / max(out_a, 1e-4);
+            surface_alpha = out_a;
+        } else {
+            color = mix(color, card.specular_accent.rgb, prism_alpha);
+        }
     }
 
-    let final_alpha = clamp(coverage * card.surface_fx.w, 0.0, 1.0);
+    let final_alpha = clamp(surface_alpha * coverage * card.surface_fx.w, 0.0, 1.0);
 
     if card.flags.y == 1u {
         return vec4<f32>(max(color, vec3<f32>(0.0)), final_alpha);

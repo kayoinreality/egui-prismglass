@@ -115,6 +115,8 @@ struct BackdropParams {
 struct BackdropCacheKey {
     size: [u32; 2],
     external_generation: Option<u64>,
+    ext_rect_bits: [u32; 4],
+    cache_epoch: u64,
     canvas_top: [u32; 4],
     canvas_bottom: [u32; 4],
     orb_primary: [u32; 4],
@@ -127,7 +129,13 @@ struct BackdropCacheKey {
 }
 
 impl BackdropCacheKey {
-    fn from_parts(size: [u32; 2], ext_gen: Option<u64>, params: &BackdropParams) -> Self {
+    fn from_parts(
+        size: [u32; 2],
+        ext_gen: Option<u64>,
+        ext_rect_uv: [f32; 4],
+        cache_epoch: u64,
+        params: &BackdropParams,
+    ) -> Self {
         let bits4 = |v: [f32; 4]| {
             [
                 v[0].to_bits(),
@@ -139,6 +147,8 @@ impl BackdropCacheKey {
         Self {
             size,
             external_generation: ext_gen,
+            ext_rect_bits: bits4(ext_rect_uv),
+            cache_epoch,
             canvas_top: bits4(params.canvas_top),
             canvas_bottom: bits4(params.canvas_bottom),
             orb_primary: bits4(params.orb_primary),
@@ -182,11 +192,20 @@ struct ExternalBackdropImage {
     generation: u64,
 }
 
+struct ExternalGpuTexture {
+    view: wgpu::TextureView,
+    generation: u64,
+}
+
 struct SharedBackdropState {
     target_format: wgpu::TextureFormat,
     params: BackdropParams,
     external_image: Option<ExternalBackdropImage>,
+    external_gpu_texture: Option<ExternalGpuTexture>,
+    external_region_points: Option<Rect>,
+    last_backdrop_render_frame: Option<u64>,
     next_generation: u64,
+    cache_epoch: u64,
     metrics: WgpuBlurMetrics,
 }
 
@@ -204,7 +223,11 @@ impl WgpuBlurProvider {
                 target_format,
                 params: BackdropParams::default(),
                 external_image: None,
+                external_gpu_texture: None,
+                external_region_points: None,
+                last_backdrop_render_frame: None,
                 next_generation: 1,
+                cache_epoch: 0,
                 metrics: WgpuBlurMetrics::default(),
             })),
         }
@@ -224,8 +247,12 @@ impl WgpuBlurProvider {
             .map_or_else(|_| WgpuBlurMetrics::default(), |s| s.metrics)
     }
 
-    /// Uploads a custom sRGB RGBA8 backdrop image (e.g., wallpaper or 3D viewport render) to be
-    /// blurred behind every glass surface instead of the procedural studio backdrop.
+    /// Uploads a custom sRGB RGBA8 backdrop image (e.g., wallpaper, camera feed, or stage capture)
+    /// to be blurred behind every glass surface instead of the procedural studio backdrop.
+    ///
+    /// Combine with [`Self::set_external_backdrop_region`] to place the image at a specific
+    /// sub-rectangle (such as a 16:9 video preview stage) while filling surrounding margins with
+    /// the theme's clean neutral canvas color.
     ///
     /// `rgba8.len()` must equal `width * height * 4`. Invalid buffers are ignored.
     pub fn set_external_backdrop_rgba8(&self, width: u32, height: u32, rgba8: Vec<u8>) {
@@ -235,6 +262,7 @@ impl WgpuBlurProvider {
         if let Ok(mut state) = self.shared.write() {
             let generation = state.next_generation;
             state.next_generation = state.next_generation.wrapping_add(1).max(1);
+            state.external_gpu_texture = None;
             state.external_image = Some(ExternalBackdropImage {
                 width,
                 height,
@@ -244,10 +272,51 @@ impl WgpuBlurProvider {
         }
     }
 
-    /// Clears any custom backdrop image and reverts to the procedural WGSL studio backdrop.
+    /// Registers a zero-copy GPU [`wgpu::TextureView`] (e.g., live video compositor output,
+    /// camera texture, or 3D viewport render target) to be blurred directly on the GPU without
+    /// CPU readback.
+    ///
+    /// The underlying texture must have [`wgpu::TextureUsages::TEXTURE_BINDING`] and a filterable
+    /// float color format (e.g., `Rgba8UnormSrgb`, `Rgba8Unorm`, `Bgra8UnormSrgb`, `Rgba16Float`).
+    /// Combine with [`Self::set_external_backdrop_region`] to map the texture to a sub-rectangle
+    /// (like a 16:9 Stage viewport). If you update the texture contents in place without calling
+    /// this method again, call [`Self::invalidate_backdrop_cache`] each frame it changes.
+    pub fn set_external_backdrop_texture(&self, view: wgpu::TextureView) {
+        if let Ok(mut state) = self.shared.write() {
+            let generation = state.next_generation;
+            state.next_generation = state.next_generation.wrapping_add(1).max(1);
+            state.external_image = None;
+            state.external_gpu_texture = Some(ExternalGpuTexture { view, generation });
+        }
+    }
+
+    /// Maps the external backdrop image or GPU texture to a specific logical `egui` rectangle
+    /// (e.g. a 16:9 streaming stage or 3D viewport) instead of stretching it full-screen.
+    ///
+    /// Areas outside `region_points` are filled cleanly with the active theme's neutral canvas
+    /// gradient (no diagonal bars or procedural waves). Pass `None` to stretch full-screen.
+    pub fn set_external_backdrop_region(&self, region_points: Option<Rect>) {
+        if let Ok(mut state) = self.shared.write() {
+            state.external_region_points = region_points;
+        }
+    }
+
+    /// Marks the cached Dual-Kawase blur pyramid dirty so it re-executes on the next frame.
+    ///
+    /// Useful when updating a registered GPU texture ([`Self::set_external_backdrop_texture`])
+    /// in place every frame without replacing its [`wgpu::TextureView`].
+    pub fn invalidate_backdrop_cache(&self) {
+        if let Ok(mut state) = self.shared.write() {
+            state.cache_epoch = state.cache_epoch.wrapping_add(1);
+        }
+    }
+
+    /// Clears any custom backdrop image/texture and region mapping.
     pub fn clear_external_backdrop(&self) {
         if let Ok(mut state) = self.shared.write() {
             state.external_image = None;
+            state.external_gpu_texture = None;
+            state.external_region_points = None;
         }
     }
 }
@@ -271,12 +340,13 @@ impl BackdropBlurProvider for WgpuBlurProvider {
             return false;
         }
 
+        let frame_id = ui.ctx().cumulative_frame_nr();
         let params = BackdropParams::from_theme(theme, time_secs, intensity);
         if let Ok(mut state) = self.shared.write() {
             state.params = params.clone();
+            state.last_backdrop_render_frame = Some(frame_id);
         }
 
-        let frame_id = ui.ctx().cumulative_frame_nr();
         let callback = BackdropPaintCallback {
             shared: Arc::clone(&self.shared),
             params,
@@ -297,25 +367,65 @@ impl BackdropBlurProvider for WgpuBlurProvider {
             return Some(Vec::new());
         }
 
-        let mut shapes = Vec::with_capacity(3);
+        let frame_id = ui.ctx().cumulative_frame_nr();
+        let (has_region, is_overlay) = self.shared.read().map_or((false, true), |s| {
+            let has_external = s.external_image.is_some() || s.external_gpu_texture.is_some();
+            let has_backdrop = has_external || s.last_backdrop_render_frame == Some(frame_id);
+            (
+                s.external_region_points.is_some(),
+                request.translucent_overlay || !has_backdrop,
+            )
+        });
+
+        if has_region {
+            let theme = PrismTheme::from_ctx(ui.ctx());
+            if let Ok(mut state) = self.shared.write() {
+                state.params.canvas_top = color32_to_linear_rgba(theme.palette.canvas);
+                state.params.canvas_bottom = color32_to_linear_rgba(theme.palette.canvas_secondary);
+                state.params.is_dark = theme.mode == ThemeMode::Dark;
+            }
+        }
+
+        let mut shapes = Vec::with_capacity(4);
         let max_r = (request.rect.width().min(request.rect.height()) * 0.5).max(0.0);
         let corner_radius = egui::CornerRadius::same(
             request.corner_radius.min(max_r).round().clamp(0.0, 255.0) as u8,
         );
 
-        // Grounded 3D dual-layer shadows are painted underneath the GPU liquid-glass quad.
-        if request.shadow != egui::Shadow::NONE {
-            shapes.push(Shape::from(
-                request.shadow.as_shape(request.rect, corner_radius),
-            ));
-        }
-        if request.contact_shadow != egui::Shadow::NONE {
-            shapes.push(Shape::from(
-                request.contact_shadow.as_shape(request.rect, corner_radius),
-            ));
+        if is_overlay {
+            // For translucent overlays over live egui content (video stages, 3D viewports),
+            // never paint egui's filled `Shadow::as_shape` behind the glass body (it darkens the
+            // interior behind transparent glass by up to ~85%). Paint exterior-only soft edge
+            // shadows strictly outside the glass silhouette so 100% of live content shines through!
+            if request.shadow != egui::Shadow::NONE || request.contact_shadow != egui::Shadow::NONE
+            {
+                shapes.push(Shape::rect_stroke(
+                    request.rect,
+                    corner_radius,
+                    egui::Stroke::new(6.0, Color32::from_rgba_unmultiplied(0, 0, 0, 22)),
+                    egui::StrokeKind::Outside,
+                ));
+                shapes.push(Shape::rect_stroke(
+                    request.rect,
+                    corner_radius,
+                    egui::Stroke::new(2.0, Color32::from_rgba_unmultiplied(0, 0, 0, 44)),
+                    egui::StrokeKind::Outside,
+                ));
+            }
+        } else {
+            // Grounded 3D dual-layer shadows are painted underneath the GPU liquid-glass quad.
+            if request.shadow != egui::Shadow::NONE {
+                shapes.push(Shape::from(
+                    request.shadow.as_shape(request.rect, corner_radius),
+                ));
+            }
+            if request.contact_shadow != egui::Shadow::NONE {
+                shapes.push(Shape::from(
+                    request.contact_shadow.as_shape(request.rect, corner_radius),
+                ));
+            }
         }
 
-        let frame_id = ui.ctx().cumulative_frame_nr();
         let callback = GlassSurfaceCallback {
             shared: Arc::clone(&self.shared),
             request: *request,
@@ -343,6 +453,7 @@ struct BackdropUniforms {
     orb_primary: [f32; 4],
     orb_secondary: [f32; 4],
     orb_accent: [f32; 4],
+    ext_rect_uv: [f32; 4],
     screen_size: [f32; 2],
     time_secs: f32,
     intensity: f32,
@@ -414,7 +525,12 @@ impl GlassCardUniforms {
             specular_top: color32_to_linear_rgba(req.specular_top),
             specular_accent: color32_to_linear_rgba(req.specular_accent),
             inner_glow: color32_to_linear_rgba(req.inner_glow),
-            flags: [u32::from(req.is_dark), u32::from(target_is_srgb), 0, 0],
+            flags: [
+                u32::from(req.is_dark),
+                u32::from(target_is_srgb),
+                u32::from(req.translucent_overlay),
+                0,
+            ],
         }
     }
 }
@@ -443,6 +559,7 @@ impl CallbackTrait for BackdropPaintCallback {
             .read()
             .map_or(wgpu::TextureFormat::Rgba8Unorm, |s| s.target_format);
         let engine = ensure_engine(device, target_format, callback_resources);
+        engine.backdrop_active_frame_id = Some(self.frame_id);
         engine.prepare_frame_pyramid(
             device,
             queue,
@@ -499,20 +616,35 @@ impl CallbackTrait for GlassSurfaceCallback {
         egui_encoder: &mut wgpu::CommandEncoder,
         callback_resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
-        let (target_format, fallback_params) = self.shared.read().map_or_else(
-            |_| (wgpu::TextureFormat::Rgba8Unorm, BackdropParams::default()),
-            |s| (s.target_format, s.params.clone()),
+        let (target_format, fallback_params, has_external) = self.shared.read().map_or_else(
+            |_| {
+                (
+                    wgpu::TextureFormat::Rgba8Unorm,
+                    BackdropParams::default(),
+                    false,
+                )
+            },
+            |s| {
+                (
+                    s.target_format,
+                    s.params.clone(),
+                    s.external_image.is_some() || s.external_gpu_texture.is_some(),
+                )
+            },
         );
         let engine = ensure_engine(device, target_format, callback_resources);
-        engine.prepare_frame_pyramid(
-            device,
-            queue,
-            screen_descriptor,
-            egui_encoder,
-            self.frame_id,
-            &fallback_params,
-            &self.shared,
-        );
+        if has_external {
+            engine.backdrop_active_frame_id = Some(self.frame_id);
+            engine.prepare_frame_pyramid(
+                device,
+                queue,
+                screen_descriptor,
+                egui_encoder,
+                self.frame_id,
+                &fallback_params,
+                &self.shared,
+            );
+        }
 
         let uniforms = GlassCardUniforms::from_request(
             &self.request,
@@ -550,12 +682,14 @@ impl CallbackTrait for GlassSurfaceCallback {
         let Some(engine) = callback_resources.get::<WgpuBlurEngine>() else {
             return;
         };
-        let Some(pyramid) = engine.pyramid.as_ref() else {
-            return;
-        };
         if (slot as usize) >= engine.uploaded_card_count {
             return;
         }
+
+        let composite_bg = engine
+            .pyramid
+            .as_ref()
+            .map_or(&engine.dummy_composite_bg, |p| &p.composite_bg);
 
         let dynamic_offset = slot * engine.card_stride;
         render_pass.set_viewport(
@@ -568,7 +702,7 @@ impl CallbackTrait for GlassSurfaceCallback {
         );
         render_pass.set_pipeline(&engine.glass_pipeline);
         render_pass.set_bind_group(0, &engine.card_uniform_bg, &[dynamic_offset]);
-        render_pass.set_bind_group(1, &pyramid.composite_bg, &[]);
+        render_pass.set_bind_group(1, composite_bg, &[]);
         render_pass.draw(0..6, 0..1);
     }
 }
@@ -642,7 +776,7 @@ struct BlurPyramid {
 
 struct UploadedExternal {
     generation: u64,
-    _texture: wgpu::Texture,
+    _texture: Option<wgpu::Texture>,
     bind_group: wgpu::BindGroup,
 }
 
@@ -670,6 +804,10 @@ struct WgpuBlurEngine {
     copy_linear_uniform_buf: wgpu::Buffer,
     copy_linear_uniform_bg: wgpu::BindGroup,
 
+    // Tiny 1x1 fallback bind group used when rendering Translucent Overlay glass with 0 pyramid VRAM.
+    _dummy_tex: RenderTarget,
+    dummy_composite_bg: wgpu::BindGroup,
+
     // Pyramid & external texture caches
     pyramid: Option<BlurPyramid>,
     external: Option<UploadedExternal>,
@@ -685,6 +823,7 @@ struct WgpuBlurEngine {
     uploaded_card_count: usize,
 
     // Per-frame deduplication
+    backdrop_active_frame_id: Option<u64>,
     pyramid_frame_id: Option<u64>,
     cards_frame_id: Option<u64>,
     flushed_frame_id: Option<u64>,
@@ -960,6 +1099,30 @@ impl WgpuBlurEngine {
         let (card_uniform_buf, card_uniform_bg) =
             create_card_buffer(device, &card_uniform_bgl, card_stride, card_capacity);
 
+        let dummy_tex = RenderTarget::new(device, 1, 1, "prismglass_dummy_1x1");
+        let dummy_composite_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: Some("prismglass_dummy_composite_bg"),
+            layout: &composite_tex_bgl,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&dummy_tex.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::TextureView(&dummy_tex.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: wgpu::BindingResource::TextureView(&dummy_tex.view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 3,
+                    resource: wgpu::BindingResource::Sampler(&sampler),
+                },
+            ],
+        });
+
         Self {
             target_format,
             sampler,
@@ -977,6 +1140,8 @@ impl WgpuBlurEngine {
             backdrop_uniform_bg,
             copy_linear_uniform_buf,
             copy_linear_uniform_bg,
+            _dummy_tex: dummy_tex,
+            dummy_composite_bg,
             pyramid: None,
             external: None,
             last_backdrop_key: None,
@@ -987,6 +1152,7 @@ impl WgpuBlurEngine {
             staged_cards: Vec::with_capacity(card_capacity),
             staged_bytes: Vec::with_capacity(card_capacity * (card_stride as usize)),
             uploaded_card_count: 0,
+            backdrop_active_frame_id: None,
             pyramid_frame_id: None,
             cards_frame_id: None,
             flushed_frame_id: None,
@@ -1036,11 +1202,34 @@ impl WgpuBlurEngine {
             self.last_backdrop_key = None;
         }
 
-        // Synchronize optional external wallpaper texture if present.
+        // Synchronize optional external wallpaper / zero-copy GPU stage texture if present.
         self.sync_external_texture(device, queue, shared);
 
+        let (ext_region_points, cache_epoch) = shared
+            .read()
+            .map_or((None, 0), |s| (s.external_region_points, s.cache_epoch));
+        let ext_rect_uv = if let Some(region) = ext_region_points {
+            let ppp = screen.pixels_per_point.max(1.0);
+            let inv_w = 1.0 / (width as f32);
+            let inv_h = 1.0 / (height as f32);
+            [
+                (region.min.x * ppp * inv_w).clamp(0.0, 1.0),
+                (region.min.y * ppp * inv_h).clamp(0.0, 1.0),
+                (region.max.x * ppp * inv_w).clamp(0.0, 1.0),
+                (region.max.y * ppp * inv_h).clamp(0.0, 1.0),
+            ]
+        } else {
+            [0.0, 0.0, 1.0, 1.0]
+        };
+
         let ext_gen = self.external.as_ref().map(|ext| ext.generation);
-        let cache_key = BackdropCacheKey::from_parts([width, height], ext_gen, params);
+        let cache_key = BackdropCacheKey::from_parts(
+            [width, height],
+            ext_gen,
+            ext_rect_uv,
+            cache_epoch,
+            params,
+        );
         if !needs_resize && self.last_backdrop_key == Some(cache_key) && self.pyramid.is_some() {
             self.metrics.pyramid_cache_hits += 1;
             self.publish_metrics(shared);
@@ -1053,6 +1242,7 @@ impl WgpuBlurEngine {
             orb_primary: params.orb_primary,
             orb_secondary: params.orb_secondary,
             orb_accent: params.orb_accent,
+            ext_rect_uv: [0.0, 0.0, 1.0, 1.0],
             screen_size: [width as f32, height as f32],
             time_secs: params.time_secs,
             intensity: params.intensity,
@@ -1069,6 +1259,7 @@ impl WgpuBlurEngine {
 
         let mut linear_copy_uniform = backdrop_uniform;
         linear_copy_uniform.target_is_srgb = 1;
+        linear_copy_uniform.ext_rect_uv = ext_rect_uv;
         queue.write_buffer(
             &self.copy_linear_uniform_buf,
             0,
@@ -1079,7 +1270,7 @@ impl WgpuBlurEngine {
             return;
         };
 
-        // Pass 0: Populate linear `source` texture (either external wallpaper or procedural studio WGSL).
+        // Pass 0: Populate linear `source` texture (either external wallpaper/stage or procedural WGSL).
         {
             let mut pass = begin_color_pass(encoder, &pyramid.source.view, "prismglass_source");
             if let Some(ext) = self.external.as_ref() {
@@ -1170,6 +1361,38 @@ impl WgpuBlurEngine {
         let Ok(state) = shared.read() else {
             return;
         };
+
+        // Zero-copy GPU TextureView path takes priority when installed.
+        if let Some(gpu_ext) = state.external_gpu_texture.as_ref() {
+            if self
+                .external
+                .as_ref()
+                .is_some_and(|uploaded| uploaded.generation == gpu_ext.generation)
+            {
+                return;
+            }
+            let bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: Some("prismglass_external_gpu_bg"),
+                layout: &self.single_tex_bgl,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::TextureView(&gpu_ext.view),
+                    },
+                    wgpu::BindGroupEntry {
+                        binding: 1,
+                        resource: wgpu::BindingResource::Sampler(&self.sampler),
+                    },
+                ],
+            });
+            self.external = Some(UploadedExternal {
+                generation: gpu_ext.generation,
+                _texture: None,
+                bind_group,
+            });
+            return;
+        }
+
         let Some(ext) = state.external_image.as_ref() else {
             self.external = None;
             return;
@@ -1232,7 +1455,7 @@ impl WgpuBlurEngine {
         });
         self.external = Some(UploadedExternal {
             generation: ext.generation,
-            _texture: texture,
+            _texture: Some(texture),
             bind_group,
         });
     }
@@ -1429,6 +1652,14 @@ impl WgpuBlurEngine {
             self.card_uniform_buf = buf;
             self.card_uniform_bg = bg;
             self.metrics.card_buffer_allocations += 1;
+        }
+
+        let frame_has_backdrop =
+            self.backdrop_active_frame_id == Some(frame_id) && self.pyramid.is_some();
+        if !frame_has_backdrop {
+            for card in &mut self.staged_cards {
+                card.flags[2] = 1;
+            }
         }
 
         let stride = self.card_stride as usize;

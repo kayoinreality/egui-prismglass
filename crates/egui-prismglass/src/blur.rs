@@ -59,6 +59,10 @@ pub struct BackdropRequest {
     pub presence: f32,
     /// Whether the active theme polarity is dark.
     pub is_dark: bool,
+    /// When `true`, renders the glass surface as an alpha-blended translucent lens over live
+    /// `egui` content (such as video viewports, 3D stages, or underlying widgets) instead of
+    /// replacing background pixels with the cached backdrop texture.
+    pub translucent_overlay: bool,
 }
 
 impl BackdropRequest {
@@ -91,7 +95,14 @@ impl BackdropRequest {
             contact_shadow: resolved.contact_shadow,
             presence: 1.0,
             is_dark: mode == ThemeMode::Dark,
+            translucent_overlay: false,
         }
+    }
+
+    /// Enables or disables real alpha-blended overlay compositing over live `egui` widgets.
+    pub fn with_translucent_overlay(mut self, enabled: bool) -> Self {
+        self.translucent_overlay = enabled;
+        self
     }
 }
 
@@ -197,15 +208,33 @@ pub(crate) fn resolve_glass_surface_shapes(
     tokens: &GlassSurfaceTokens,
     theme: &PrismTheme,
 ) -> Vec<Shape> {
+    resolve_glass_surface_shapes_with_overlay(ui, id, rect, tokens, theme, false)
+}
+
+/// Variant of [`resolve_glass_surface_shapes`] that forwards explicit `translucent_overlay` mode
+/// for floating menus/popovers rendered over live `egui` content (video viewports, 3D stages, etc.).
+pub(crate) fn resolve_glass_surface_shapes_with_overlay(
+    ui: &Ui,
+    id: Id,
+    rect: Rect,
+    tokens: &GlassSurfaceTokens,
+    theme: &PrismTheme,
+    translucent_overlay: bool,
+) -> Vec<Shape> {
     if theme.real_blur_enabled
         && theme.surface_style == SurfaceStyle::Glass
         && tokens.blur_radius > 0.1
         && let Some(provider) = blur_provider(ui.ctx())
     {
-        let req = BackdropRequest::from_tokens_with_mode(rect, tokens, theme.mode);
+        let req = BackdropRequest::from_tokens_with_mode(rect, tokens, theme.mode)
+            .with_translucent_overlay(translucent_overlay);
         if let Some(shapes) = provider.render_glass_surface(ui, id, &req) {
             return shapes;
         }
+    }
+
+    if translucent_overlay && theme.surface_style == SurfaceStyle::Glass {
+        return crate::painter::glass_overlay_surface_shapes_with_ctx(ui.ctx(), rect, tokens);
     }
 
     crate::painter::glass_surface_shapes_with_ctx(ui.ctx(), rect, tokens)

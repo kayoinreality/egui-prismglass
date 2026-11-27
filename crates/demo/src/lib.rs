@@ -697,20 +697,21 @@ impl DemoApp {
                                 .color(self.theme.palette.text_muted),
                         );
                         ui.add_space(3.0);
-                        ui.horizontal(|ui| {
+                        ui.horizontal_wrapped(|ui| {
                             ui.spacing_mut().item_spacing = vec2(6.0, 6.0);
-                            let btn_w = ((ui.available_width() - 12.0) / 3.0).max(68.0);
                             for scene in [
                                 BackdropScene::SculptedWaves,
                                 BackdropScene::LiquidPrism,
                                 BackdropScene::ArchitecturalGrid,
+                                BackdropScene::StudioNeutral,
+                                BackdropScene::None,
                             ] {
                                 let selected = self.theme.backdrop_scene == scene;
                                 if ui
                                     .add(
                                         GlassButton::secondary(scene.label())
                                             .selected(selected)
-                                            .min_size(vec2(btn_w, 27.0)),
+                                            .min_size(vec2(82.0, 27.0)),
                                     )
                                     .clicked()
                                 {
