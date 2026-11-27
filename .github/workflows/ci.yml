@@ -42,6 +42,8 @@ jobs:
           cargo check -p egui-prismglass --features serde
           cargo check -p egui-prismglass --features blur-wgpu
           cargo check -p egui-prismglass --features blur-glow
+          cargo check -p egui-prismglass --benches
+          cargo check -p egui-prismglass --features blur-wgpu --example gpu_benchmark
           cargo check -p demo --no-default-features --features blur-glow --example glow_blur
       - name: Verify rustdoc
         env:
@@ -75,8 +77,10 @@ jobs:
           cargo test -p egui-prismglass --features blur-wgpu --doc
           cargo test -p egui-prismglass --features blur-glow --lib
           cargo test -p egui-prismglass --features blur-glow --doc
-      - name: Run real GPU Dual-Kawase blur test (Linux software Vulkan)
+      - name: Run real GPU blur & visual regression matrix (Linux software Vulkan)
         if: runner.os == 'Linux'
-        run: cargo test -p egui-prismglass --features blur-wgpu --test wgpu_blur
+        run: |
+          cargo test -p egui-prismglass --features blur-wgpu --test wgpu_blur
+          cargo test -p egui-prismglass --features blur-wgpu --test visual_regression
       - name: Build workspace (core + demo)
         run: cargo build --workspace

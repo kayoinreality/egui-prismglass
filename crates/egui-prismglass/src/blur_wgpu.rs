@@ -77,6 +77,27 @@ pub fn install_with_format(
     provider
 }
 
+/// Live GPU memory, texture-reuse, and cache telemetry reported by [`WgpuBlurProvider::metrics`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub struct WgpuBlurMetrics {
+    /// Current physical resolution `[width, height]` of the cached Dual-Kawase blur pyramid.
+    pub pyramid_size: [u32; 2],
+    /// Number of intermediate GPU textures owned by the pyramid (6 in-place `Rgba16Float` targets).
+    pub pyramid_texture_count: usize,
+    /// Estimated GPU VRAM consumed by the `Rgba16Float` blur pyramid in bytes.
+    pub estimated_vram_bytes: u64,
+    /// Total number of times the blur pyramid textures were allocated or resized.
+    pub pyramid_allocations: u64,
+    /// Total number of times the full backdrop + Dual-Kawase pyramid executed on the GPU.
+    pub pyramid_passes_executed: u64,
+    /// Total number of frames where the cached pyramid was reused directly with `0` blur passes.
+    pub pyramid_cache_hits: u64,
+    /// Total number of times the dynamic glass-card uniform buffer was allocated or grown.
+    pub card_buffer_allocations: u64,
+    /// Number of glass surfaces rendered in the most recent frame.
+    pub last_frame_card_count: usize,
+}
+
 #[derive(Clone)]
 struct BackdropParams {
     canvas_top: [f32; 4],
@@ -88,6 +109,47 @@ struct BackdropParams {
     intensity: f32,
     scene_id: u32,
     is_dark: bool,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+struct BackdropCacheKey {
+    size: [u32; 2],
+    external_generation: Option<u64>,
+    canvas_top: [u32; 4],
+    canvas_bottom: [u32; 4],
+    orb_primary: [u32; 4],
+    orb_secondary: [u32; 4],
+    orb_accent: [u32; 4],
+    time_bits: u32,
+    intensity_bits: u32,
+    scene_id: u32,
+    is_dark: bool,
+}
+
+impl BackdropCacheKey {
+    fn from_parts(size: [u32; 2], ext_gen: Option<u64>, params: &BackdropParams) -> Self {
+        let bits4 = |v: [f32; 4]| {
+            [
+                v[0].to_bits(),
+                v[1].to_bits(),
+                v[2].to_bits(),
+                v[3].to_bits(),
+            ]
+        };
+        Self {
+            size,
+            external_generation: ext_gen,
+            canvas_top: bits4(params.canvas_top),
+            canvas_bottom: bits4(params.canvas_bottom),
+            orb_primary: bits4(params.orb_primary),
+            orb_secondary: bits4(params.orb_secondary),
+            orb_accent: bits4(params.orb_accent),
+            time_bits: params.time_secs.to_bits(),
+            intensity_bits: params.intensity.to_bits(),
+            scene_id: params.scene_id,
+            is_dark: params.is_dark,
+        }
+    }
 }
 
 impl Default for BackdropParams {
@@ -125,6 +187,7 @@ struct SharedBackdropState {
     params: BackdropParams,
     external_image: Option<ExternalBackdropImage>,
     next_generation: u64,
+    metrics: WgpuBlurMetrics,
 }
 
 /// Real GPU backdrop-blur provider powered by pure-WGSL Dual-Kawase + Apple Liquid Glass optics.
@@ -142,6 +205,7 @@ impl WgpuBlurProvider {
                 params: BackdropParams::default(),
                 external_image: None,
                 next_generation: 1,
+                metrics: WgpuBlurMetrics::default(),
             })),
         }
     }
@@ -150,6 +214,14 @@ impl WgpuBlurProvider {
     #[must_use]
     pub fn from_render_state(render_state: &egui_wgpu::RenderState) -> Self {
         Self::new(render_state.target_format)
+    }
+
+    /// Returns a snapshot of live GPU memory, texture-reuse, and cache telemetry.
+    #[must_use]
+    pub fn metrics(&self) -> WgpuBlurMetrics {
+        self.shared
+            .read()
+            .map_or_else(|_| WgpuBlurMetrics::default(), |s| s.metrics)
     }
 
     /// Uploads a custom sRGB RGBA8 backdrop image (e.g., wallpaper or 3D viewport render) to be
@@ -460,7 +532,7 @@ impl CallbackTrait for GlassSurfaceCallback {
         callback_resources: &mut CallbackResources,
     ) -> Vec<wgpu::CommandBuffer> {
         if let Some(engine) = callback_resources.get_mut::<WgpuBlurEngine>() {
-            engine.flush_cards_to_gpu(device, queue, self.frame_id);
+            engine.flush_cards_to_gpu(device, queue, self.frame_id, &self.shared);
         }
         Vec::new()
     }
@@ -545,15 +617,16 @@ struct KawasePassStep {
 
 struct BlurPyramid {
     size: [u32; 2],
+    vram_bytes: u64,
+    // 6 in-place `Rgba16Float` targets: `down3`, `down2`, and `down1` are reused as
+    // upsample targets on the return pass (`down1` holds final `blur_deep`), cutting
+    // intermediate VRAM by ~17% vs allocating separate upsample textures.
     source: RenderTarget,
-    down1: RenderTarget,
+    down1_or_deep: RenderTarget,
     down2: RenderTarget,
     down3: RenderTarget,
     down4: RenderTarget,
-    up3: RenderTarget,
-    up2: RenderTarget,
     blur_med: RenderTarget,
-    blur_deep: RenderTarget,
     // Pre-built bind groups for zero per-frame allocation:
     blit_source_bg: wgpu::BindGroup,
     composite_bg: wgpu::BindGroup,
@@ -600,6 +673,7 @@ struct WgpuBlurEngine {
     // Pyramid & external texture caches
     pyramid: Option<BlurPyramid>,
     external: Option<UploadedExternal>,
+    last_backdrop_key: Option<BackdropCacheKey>,
 
     // Per-frame dynamic card uniforms
     card_stride: u32,
@@ -614,6 +688,9 @@ struct WgpuBlurEngine {
     pyramid_frame_id: Option<u64>,
     cards_frame_id: Option<u64>,
     flushed_frame_id: Option<u64>,
+
+    // Telemetry counters
+    metrics: WgpuBlurMetrics,
 }
 
 fn ensure_engine<'a>(
@@ -902,6 +979,7 @@ impl WgpuBlurEngine {
             copy_linear_uniform_bg,
             pyramid: None,
             external: None,
+            last_backdrop_key: None,
             card_stride,
             card_capacity,
             card_uniform_buf,
@@ -912,6 +990,16 @@ impl WgpuBlurEngine {
             pyramid_frame_id: None,
             cards_frame_id: None,
             flushed_frame_id: None,
+            metrics: WgpuBlurMetrics {
+                card_buffer_allocations: 1,
+                ..WgpuBlurMetrics::default()
+            },
+        }
+    }
+
+    fn publish_metrics(&self, shared: &Arc<RwLock<SharedBackdropState>>) {
+        if let Ok(mut state) = shared.write() {
+            state.metrics = self.metrics;
         }
     }
 
@@ -930,6 +1018,7 @@ impl WgpuBlurEngine {
             return;
         }
         self.pyramid_frame_id = Some(frame_id);
+        self.metrics.last_frame_card_count = 0;
 
         let width = screen.size_in_pixels[0].max(1);
         let height = screen.size_in_pixels[1].max(1);
@@ -938,11 +1027,25 @@ impl WgpuBlurEngine {
             .as_ref()
             .is_none_or(|p| p.size != [width, height]);
         if needs_resize {
-            self.pyramid = Some(self.build_pyramid(device, queue, width, height));
+            let pyramid = self.build_pyramid(device, queue, width, height);
+            self.metrics.pyramid_allocations += 1;
+            self.metrics.pyramid_size = pyramid.size;
+            self.metrics.pyramid_texture_count = 6;
+            self.metrics.estimated_vram_bytes = pyramid.vram_bytes;
+            self.pyramid = Some(pyramid);
+            self.last_backdrop_key = None;
         }
 
         // Synchronize optional external wallpaper texture if present.
         self.sync_external_texture(device, queue, shared);
+
+        let ext_gen = self.external.as_ref().map(|ext| ext.generation);
+        let cache_key = BackdropCacheKey::from_parts([width, height], ext_gen, params);
+        if !needs_resize && self.last_backdrop_key == Some(cache_key) && self.pyramid.is_some() {
+            self.metrics.pyramid_cache_hits += 1;
+            self.publish_metrics(shared);
+            return;
+        }
 
         let backdrop_uniform = BackdropUniforms {
             canvas_top: params.canvas_top,
@@ -996,7 +1099,7 @@ impl WgpuBlurEngine {
             encoder,
             &self.kawase_down_pipeline,
             &pyramid.step_down1,
-            &pyramid.down1.view,
+            &pyramid.down1_or_deep.view,
             "prismglass_down1",
         );
         run_kawase_pass(
@@ -1021,7 +1124,7 @@ impl WgpuBlurEngine {
             "prismglass_down4",
         );
 
-        // Pass 5: Medium blur target (`down2 -> blur_med` at 1/2 res).
+        // Pass 5: Medium blur target (`down2 -> blur_med` at 1/2 res) before `down2` is reused.
         run_kawase_pass(
             encoder,
             &self.kawase_up_pipeline,
@@ -1030,28 +1133,32 @@ impl WgpuBlurEngine {
             "prismglass_blur_med",
         );
 
-        // Passes 6..8: Deep frosted blur chain (`down4 -> up3 -> up2 -> blur_deep` at 1/2 res).
+        // Passes 6..8: In-place deep frosted blur chain (`down4 -> down3 -> down2 -> down1_or_deep`).
         run_kawase_pass(
             encoder,
             &self.kawase_up_pipeline,
             &pyramid.step_up3,
-            &pyramid.up3.view,
+            &pyramid.down3.view,
             "prismglass_up3",
         );
         run_kawase_pass(
             encoder,
             &self.kawase_up_pipeline,
             &pyramid.step_up2,
-            &pyramid.up2.view,
+            &pyramid.down2.view,
             "prismglass_up2",
         );
         run_kawase_pass(
             encoder,
             &self.kawase_up_pipeline,
             &pyramid.step_deep,
-            &pyramid.blur_deep.view,
+            &pyramid.down1_or_deep.view,
             "prismglass_blur_deep",
         );
+
+        self.last_backdrop_key = Some(cache_key);
+        self.metrics.pyramid_passes_executed += 1;
+        self.publish_metrics(shared);
     }
 
     fn sync_external_texture(
@@ -1147,14 +1254,22 @@ impl WgpuBlurEngine {
         let h4 = (height / 16).max(1);
 
         let source = RenderTarget::new(device, width, height, "prismglass_source");
-        let down1 = RenderTarget::new(device, w1, h1, "prismglass_down1");
+        let down1_or_deep = RenderTarget::new(device, w1, h1, "prismglass_down1_or_deep");
         let down2 = RenderTarget::new(device, w2, h2, "prismglass_down2");
         let down3 = RenderTarget::new(device, w3, h3, "prismglass_down3");
         let down4 = RenderTarget::new(device, w4, h4, "prismglass_down4");
-        let up3 = RenderTarget::new(device, w3, h3, "prismglass_up3");
-        let up2 = RenderTarget::new(device, w2, h2, "prismglass_up2");
         let blur_med = RenderTarget::new(device, w1, h1, "prismglass_blur_med");
-        let blur_deep = RenderTarget::new(device, w1, h1, "prismglass_blur_deep");
+
+        // Each `Rgba16Float` texel occupies 8 bytes (4 channels × 16-bit float).
+        let target_bytes = |target: &RenderTarget| -> u64 {
+            u64::from(target.size[0]) * u64::from(target.size[1]) * 8
+        };
+        let vram_bytes = target_bytes(&source)
+            + target_bytes(&down1_or_deep)
+            + target_bytes(&down2)
+            + target_bytes(&down3)
+            + target_bytes(&down4)
+            + target_bytes(&blur_med);
 
         let blit_source_bg = device.create_bind_group(&wgpu::BindGroupDescriptor {
             label: Some("prismglass_blit_source_bg"),
@@ -1185,7 +1300,7 @@ impl WgpuBlurEngine {
                 },
                 wgpu::BindGroupEntry {
                     binding: 2,
-                    resource: wgpu::BindingResource::TextureView(&blur_deep.view),
+                    resource: wgpu::BindingResource::TextureView(&down1_or_deep.view),
                 },
                 wgpu::BindGroupEntry {
                     binding: 3,
@@ -1194,28 +1309,28 @@ impl WgpuBlurEngine {
             ],
         });
 
-        let step_down1 = self.make_kawase_step(device, queue, &source.view, down1.size, 1.2);
-        let step_down2 = self.make_kawase_step(device, queue, &down1.view, down2.size, 1.35);
+        let step_down1 =
+            self.make_kawase_step(device, queue, &source.view, down1_or_deep.size, 1.2);
+        let step_down2 =
+            self.make_kawase_step(device, queue, &down1_or_deep.view, down2.size, 1.35);
         let step_down3 = self.make_kawase_step(device, queue, &down2.view, down3.size, 1.45);
         let step_down4 = self.make_kawase_step(device, queue, &down3.view, down4.size, 1.55);
 
         let step_med = self.make_kawase_step(device, queue, &down2.view, blur_med.size, 1.25);
 
-        let step_up3 = self.make_kawase_step(device, queue, &down4.view, up3.size, 1.5);
-        let step_up2 = self.make_kawase_step(device, queue, &up3.view, up2.size, 1.4);
-        let step_deep = self.make_kawase_step(device, queue, &up2.view, blur_deep.size, 1.35);
+        let step_up3 = self.make_kawase_step(device, queue, &down4.view, down3.size, 1.5);
+        let step_up2 = self.make_kawase_step(device, queue, &down3.view, down2.size, 1.4);
+        let step_deep = self.make_kawase_step(device, queue, &down2.view, down1_or_deep.size, 1.35);
 
         BlurPyramid {
             size: [width, height],
+            vram_bytes,
             source,
-            down1,
+            down1_or_deep,
             down2,
             down3,
             down4,
-            up3,
-            up2,
             blur_med,
-            blur_deep,
             blit_source_bg,
             composite_bg,
             step_down1,
@@ -1283,7 +1398,13 @@ impl WgpuBlurEngine {
         slot
     }
 
-    fn flush_cards_to_gpu(&mut self, device: &wgpu::Device, queue: &wgpu::Queue, frame_id: u64) {
+    fn flush_cards_to_gpu(
+        &mut self,
+        device: &wgpu::Device,
+        queue: &wgpu::Queue,
+        frame_id: u64,
+        shared: &Arc<RwLock<SharedBackdropState>>,
+    ) {
         if self.flushed_frame_id == Some(frame_id) {
             return;
         }
@@ -1291,7 +1412,9 @@ impl WgpuBlurEngine {
 
         let count = self.staged_cards.len();
         self.uploaded_card_count = count;
+        self.metrics.last_frame_card_count = count;
         if count == 0 {
+            self.publish_metrics(shared);
             return;
         }
 
@@ -1305,6 +1428,7 @@ impl WgpuBlurEngine {
             );
             self.card_uniform_buf = buf;
             self.card_uniform_bg = bg;
+            self.metrics.card_buffer_allocations += 1;
         }
 
         let stride = self.card_stride as usize;
@@ -1317,6 +1441,7 @@ impl WgpuBlurEngine {
                 .copy_from_slice(bytemuck::bytes_of(card));
         }
         queue.write_buffer(&self.card_uniform_buf, 0, &self.staged_bytes[..total_bytes]);
+        self.publish_metrics(shared);
     }
 }
 

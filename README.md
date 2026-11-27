@@ -158,6 +158,23 @@ fn render_ui(ui: &mut egui::Ui) {
 
 ---
 
+## Visual Regression Testing & Reproducible Benchmarks
+
+`egui-prismglass` ships with a **12-test automated GPU visual regression matrix** (golden PNG snapshots, scissor clipping, corner rounding, `1.0x–2.5x` DPI scaling, dynamic resize, edge-artifact audit, optical shader invariants, and texture/cache reuse) plus **reproducible CPU & GPU benchmarks** — see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for measured results and integrated GPU VRAM/bandwidth analysis.
+
+```bash
+# Run the 12-test GPU visual regression & shader invariant matrix:
+cargo test -p egui-prismglass --features blur-wgpu --test visual_regression
+
+# Run reproducible CPU micro-benchmarks:
+cargo bench -p egui-prismglass --bench surface_bench
+
+# Run reproducible GPU resolution scaling (720p..1440p), 1..64 surface scaling & VRAM/cache audit:
+cargo run --release -p egui-prismglass --features blur-wgpu --example gpu_benchmark
+```
+
+---
+
 ## Roadmap
 
 - [x] **v0.1.0**: Design tokens, 5 built-in presets across 3D Apple Glass & Minimal Solid, directional 3D bevel glass painter, spring & easing animation kit (`anim`), 7 core widgets, interactive `demo`, CI across Linux/Windows/macOS.
