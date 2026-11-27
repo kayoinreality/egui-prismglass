@@ -80,7 +80,7 @@ jobs:
       - name: Run real GPU blur & visual regression matrix (Linux software Vulkan)
         if: runner.os == 'Linux'
         run: |
-          cargo test -p egui-prismglass --features blur-wgpu --test wgpu_blur
-          cargo test -p egui-prismglass --features blur-wgpu --test visual_regression
+          cargo test -p egui-prismglass --features blur-wgpu --test wgpu_blur -- --test-threads=1
+          cargo test -p egui-prismglass --features blur-wgpu --test visual_regression -- --test-threads=1
       - name: Build workspace (core + demo)
         run: cargo build --workspace

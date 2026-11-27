@@ -158,9 +158,34 @@ fn render_ui(ui: &mut egui::Ui) {
 
 ---
 
-## Visual Regression Testing & Reproducible Benchmarks
+## Visual Regression Matrix & Reproducible Benchmarks
 
-`egui-prismglass` ships with a **12-test automated GPU visual regression matrix** (golden PNG snapshots, scissor clipping, corner rounding, `1.0x–2.5x` DPI scaling, dynamic resize, edge-artifact audit, optical shader invariants, and texture/cache reuse) plus **reproducible CPU & GPU benchmarks** — see [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for measured results and integrated GPU VRAM/bandwidth analysis.
+`egui-prismglass` ships with a **12-test automated GPU visual regression matrix** (executed in CI on every push) and **reproducible CPU + GPU benchmarks**. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for the complete methodology, JSON export, and integrated GPU (Intel Iris Xe / AMD Radeon 780M / Apple Silicon UMA) bandwidth analysis.
+
+### Automated Visual & Shader Test Matrix
+
+| Domain | Verified Invariants (`visual_regression.rs`) |
+| :--- | :--- |
+| **Golden Snapshots & Determinism** | Bit-exact frame determinism + 6 golden PNG baselines (`Glacial`, `Onyx`, `Frost`, `Tinted Pills`, `Minimal Light`, `Minimal Dark`) with `PRISMGLASS_UPDATE_SNAPSHOTS=1` refresh workflow |
+| **Clipping & Rounding** | Zero pixel bleed outside `ui.set_clip_rect(...)` / `ScrollArea`; analytic SDF corner masking at `0 pt`, `24 pt`, and `999 pt` clamped pill |
+| **DPI & Resolution Matrix** | `1.0x`, `1.5x`, `2.0x`, `2.5x` DPI scaling + dynamic runtime resize (`320×240 → 640×360 → 800×600 → 1280×720`) with exact 6-texture VRAM accounting |
+| **Edge Artifacts** | 4 viewport-overhanging cards at max refraction & dispersion — zero UV wrap-around, zero NaNs, opaque alpha `255` everywhere |
+| **Shader Optics & Cache Reuse** | Blur monotonicity (`0.5 → 10 → 32 pt`), convex-bezel Snell refraction, RGB chromatic dispersion `\|R − B\|`, Beer-Lambert tint transmission, GPU↔Fallback parity, and zero-reallocation pyramid + static backdrop cache hits |
+
+### Performance & Memory Highlights
+
+- **6-texture in-place `Rgba16Float` Dual-Kawase pyramid**: reuses `down3`, `down2`, and `down1_or_deep` during upsampling (**~17% less VRAM** than 9 separate targets) and runs **once per frame (`O(1)` in widget count)**.
+- **Static Backdrop Cache (`BackdropCacheKey`)**: skips all 9 GPU blur passes (`0.00 ms` blur cost, `0.00 GB/s` blur bandwidth) whenever the backdrop is unchanged between frames.
+- **CPU Surface Preparation (`cargo bench -p egui-prismglass --bench surface_bench`)**: `PrismTheme::surface` **124 ns** · `BackdropRequest` **62.6 ns** · `glass_surface_shapes` **12.4–13.3 µs** · 1,000 springs/frame **9.44 µs**.
+
+| Resolution | Pyramid VRAM (6 × `Rgba16Float`) | Animated Blur Delta (`llvmpipe` CI baseline) | Static Cached Frame Reduction | Allocations |
+| :--- | ---: | ---: | ---: | ---: |
+| `1280×720` (720p) | **11.12 MiB** | 47.74 ms | **−52%** (`0` blur passes) | `1` |
+| `1440×900` (900p) | **15.64 MiB** | 67.27 ms | **−56%** (`0` blur passes) | `1` |
+| `1920×1080` (1080p) | **25.03 MiB** | 102.06 ms | **−56%** (`0` blur passes) | `1` |
+| `2560×1440` (1440p) | **44.49 MiB** | 191.73 ms | **−59%** (`0` blur passes) | `1` |
+
+*(Baseline measured in headless software Vulkan `llvmpipe` — 50×–200× slower than hardware GPUs, while preserving exact `O(W·H)` scaling and VRAM/cache counts. At `16–64` simultaneous cards, cached GPU Liquid Glass (`1.706 ms/surf`) also outperforms pure-`egui` fallback (`2.548 ms/surf`).)*
 
 ```bash
 # Run the 12-test GPU visual regression & shader invariant matrix:
@@ -169,7 +194,7 @@ cargo test -p egui-prismglass --features blur-wgpu --test visual_regression
 # Run reproducible CPU micro-benchmarks:
 cargo bench -p egui-prismglass --bench surface_bench
 
-# Run reproducible GPU resolution scaling (720p..1440p), 1..64 surface scaling & VRAM/cache audit:
+# Run reproducible GPU resolution scaling (720p..1440p), 1..64 surface scaling & VRAM/cache audit on your GPU:
 cargo run --release -p egui-prismglass --features blur-wgpu --example gpu_benchmark
 ```
 

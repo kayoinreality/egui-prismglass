@@ -16,7 +16,7 @@
 #![allow(missing_docs)]
 
 use std::path::{Path, PathBuf};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use egui::{Area, Color32, Id, Margin, Rect, ScrollArea, UiBuilder, pos2, vec2};
 use egui_kittest::Harness;
@@ -27,6 +27,17 @@ use egui_prismglass::{
     PrismContextExt, PrismTheme, paint_prism_backdrop_ui,
 };
 use image::RgbaImage;
+
+/// Serializes headless `wgpu` device creation/teardown across parallel `cargo test` threads.
+/// Mesa's software Vulkan driver (`lavapipe` / LLVM JIT) can segfault if multiple `VkDevice`
+/// instances initialize and compile shaders concurrently inside the same process.
+static GPU_TEST_LOCK: Mutex<()> = Mutex::new(());
+
+fn lock_gpu() -> MutexGuard<'static, ()> {
+    GPU_TEST_LOCK
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
 
 // ---------------------------------------------------------------------------
 // Synthetic Backdrop & Image Analysis Helpers
@@ -213,6 +224,7 @@ fn render_fixture(
     theme: PrismTheme,
     draw_cards: impl Fn(&mut egui::Ui, &PrismTheme) + 'static,
 ) -> RgbaImage {
+    let _gpu = lock_gpu();
     let mut installed = false;
     let mut harness = Harness::builder()
         .with_size(vec2(width as f32, height as f32))
@@ -493,6 +505,7 @@ fn corner_rounding_zero_standard_and_pill_clamped() {
     let checker = build_checkerboard(width, height, 8);
 
     let render_with_radius = |radius: Option<f32>| -> RgbaImage {
+        let _gpu = lock_gpu();
         let checker_clone = checker.clone();
         let mut installed = false;
         let mut harness = Harness::builder()
@@ -587,6 +600,7 @@ fn dpi_scaling_matrix_1x_to_2_5x() {
         let metrics_slot: Arc<Mutex<Option<Arc<WgpuBlurProvider>>>> = Arc::new(Mutex::new(None));
         let metrics_slot_ui = metrics_slot.clone();
 
+        let _gpu = lock_gpu();
         let mut harness = Harness::builder()
             .with_size(vec2(logical_w as f32, logical_h as f32))
             .with_pixels_per_point(ppp)
@@ -673,6 +687,7 @@ fn resolution_matrix_and_dynamic_resize() {
     let provider_slot: Arc<Mutex<Option<Arc<WgpuBlurProvider>>>> = Arc::new(Mutex::new(None));
     let provider_ui = provider_slot.clone();
 
+    let _gpu = lock_gpu();
     let mut harness = Harness::builder()
         .with_size(vec2(320.0, 240.0))
         .with_pixels_per_point(1.0)
@@ -746,6 +761,7 @@ fn screen_boundary_cards_have_no_edge_artifacts() {
     // Bright uniform pastel sky backdrop so any UV wrap-around / black edge / NaN stands out immediately.
     let sky = build_solid_rgba8(width, height, [210, 224, 244, 255]);
 
+    let _gpu = lock_gpu();
     let mut installed = false;
     let mut harness = Harness::builder()
         .with_size(vec2(width as f32, height as f32))
@@ -825,6 +841,7 @@ fn blur_radius_monotonicity() {
     let checker = build_checkerboard(width, height, 6);
 
     let measure_blur_var = |radius: f32| -> f64 {
+        let _gpu = lock_gpu();
         let checker_clone = checker.clone();
         let mut installed = false;
         let mut harness = Harness::builder()
@@ -885,6 +902,7 @@ fn snell_refraction_and_chromatic_dispersion_invariants() {
     let stripes = build_vertical_stripes(width, height, 10);
 
     let render_optics = |refraction: f32, dispersion: f32| -> RgbaImage {
+        let _gpu = lock_gpu();
         let stripes_clone = stripes.clone();
         let mut installed = false;
         let mut harness = Harness::builder()
@@ -966,6 +984,7 @@ fn beer_lambert_tinted_glass_transmission() {
     let height = 180u32;
     let white = build_solid_rgba8(width, height, [238, 240, 244, 255]);
 
+    let _gpu = lock_gpu();
     let mut installed = false;
     let mut harness = Harness::builder()
         .with_size(vec2(width as f32, height as f32))
@@ -1033,6 +1052,7 @@ fn fallback_toggle_switches_cleanly_between_gpu_and_cpu() {
     let observed_cap_ui = observed_cap.clone();
     let mut installed = false;
 
+    let _gpu = lock_gpu();
     let mut harness = Harness::builder()
         .with_size(vec2(256.0, 180.0))
         .with_pixels_per_point(1.0)
@@ -1110,6 +1130,7 @@ fn intermediate_texture_reuse_and_static_pyramid_caching() {
     let provider_slot: Arc<Mutex<Option<Arc<WgpuBlurProvider>>>> = Arc::new(Mutex::new(None));
     let provider_ui = provider_slot.clone();
 
+    let _gpu = lock_gpu();
     let mut harness = Harness::builder()
         .with_size(vec2(640.0, 360.0))
         .with_pixels_per_point(1.0)
