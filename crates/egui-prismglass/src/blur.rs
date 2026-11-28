@@ -222,7 +222,7 @@ pub(crate) fn resolve_glass_surface_shapes_with_overlay(
     translucent_overlay: bool,
 ) -> Vec<Shape> {
     if theme.real_blur_enabled
-        && theme.surface_style == SurfaceStyle::Glass
+        && theme.surface_style.uses_backdrop()
         && tokens.blur_radius > 0.1
         && let Some(provider) = blur_provider(ui.ctx())
     {
@@ -233,7 +233,7 @@ pub(crate) fn resolve_glass_surface_shapes_with_overlay(
         }
     }
 
-    if translucent_overlay && theme.surface_style == SurfaceStyle::Glass {
+    if translucent_overlay && theme.surface_style.uses_backdrop() {
         return crate::painter::glass_overlay_surface_shapes_with_ctx(ui.ctx(), rect, tokens);
     }
 

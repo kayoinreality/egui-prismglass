@@ -8,8 +8,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [Unreleased]
 
 ### Planned
-- Additional glass widgets: `GlassTextField`, `GlassTabs`, `GlassModal`, `GlassToast`, `GlassProgressBar`
+- Additional widgets: `GlassTextField`, `GlassModal`, `GlassToast`, menus and popovers
 - Interactive WebAssembly live playground
+
+## [0.3.0] - 2026-11-28
+
+### Added
+- **Prism design language**: four new presets in two materials:
+  - `SurfaceStyle::Layered` (`PrismTheme::prism_dark` / `prism_light`): solid, flat content with frosted glass reserved for floating layers (sidebars, popovers, menus, floating toolbars).
+  - `SurfaceStyle::Frosted` (`PrismTheme::prism_glass_dark` / `prism_glass_light`): the same language with every container made of frosted glass.
+  - `PrismTheme::prism(mode, style)`, `PrismTheme::with_material(style)`, `PrismTheme::on_accent()`, `PrismPreset::PRISM` / `PrismPreset::CLASSIC`, `SurfaceStyle::{is_prism, uses_backdrop, label}`.
+- **Typography (`typography`, feature `inter`, on by default)**: bundled Inter variable font (SIL OFL 1.1) registered in Regular / Medium / Semibold plus tabular figures; `install_fonts`, `prism_font`, `prism_numeric_font`, `FontWeight`, `PrismContextExt::install_prism_fonts`. Widgets fall back to egui's fonts when Inter is not installed.
+- **Neutral tokens (`PrismNeutrals`)** on every theme (`PrismTheme::neutrals`): surface, raised, sunken, control-on, hairlines, hover/selected overlays and a muted status color.
+- **Prism accents (`AccentPalette::prism`)**: each palette calibrated to keep ≥ 4.5:1 contrast with its label color.
+- **Aurora backdrop (`BackdropScene::Aurora`)**: soft multi-color light pools, in WGSL and in the CPU fallback; the default scene of the Prism presets.
+- **New widgets**: `GlassSegmented` (with counts), `GlassProgress`, `GlassCheckbox`, `GlassButton::danger` / `GlassButtonVariant::Danger`, `BadgeVariant::Danger`, and `SidebarIcon::{List, Layers, Clock, Chart, Folder}`.
+- **`paint_glass_surface_ui`**: paint a themed surface (solid or GPU glass) into any rect for custom layouts.
+- **Prism Studio demo**: `cargo run -p demo` now opens a render-queue app with Dark/Light, Layered/All glass and accent switching; the v0.2 showcase stays available as "Classic showcase".
+- Visual regression: Prism goldens for both materials plus a material invariant (Layered cards opaque, All-glass cards transmit the backdrop).
+
+### Changed
+- `PrismTheme::default()` (and the fallback of `PrismTheme::from_ctx`) is now **Prism Dark**; `PrismPreset::default()` is `PrismDark`.
+- `GlassButton::min_size` is now optional internally; the classic default height (34 pt) is unchanged.
+- Prism-style widgets expose accessibility roles (switch, checkbox, slider, progress indicator).
+
+### Unchanged
+- The classic presets (`Frost`, `Onyx`, `Glacial`, `MinimalLight`, `MinimalDark`) render exactly as in v0.2 (golden snapshots enforced).
 
 ## [0.2.0] - 2026-11-27
 

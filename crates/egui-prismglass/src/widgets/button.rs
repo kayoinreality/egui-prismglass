@@ -22,6 +22,8 @@ pub enum GlassButtonVariant {
     Accent,
     /// Minimal transparent button that reveals a subtle frosted glass surface on hover.
     Ghost,
+    /// Destructive action (solid red). Classic presets render it like [`Self::Accent`] tinted red.
+    Danger,
 }
 
 /// A clean, modern frosted-glass button with crisp hairline borders and refined variants.
@@ -33,7 +35,7 @@ pub struct GlassButton {
     icon: Option<String>,
     variant: GlassButtonVariant,
     pill: bool,
-    min_size: Vec2,
+    min_size: Option<Vec2>,
     enabled: bool,
     selected: bool,
     custom_tint: Option<Color32>,
@@ -48,7 +50,7 @@ impl GlassButton {
             icon: None,
             variant: GlassButtonVariant::Secondary,
             pill: false,
-            min_size: vec2(0.0, 34.0),
+            min_size: None,
             enabled: true,
             selected: false,
             custom_tint: None,
@@ -94,9 +96,14 @@ impl GlassButton {
         self
     }
 
-    /// Sets a minimum button size.
+    /// Creates a [`GlassButtonVariant::Danger`] destructive button.
+    pub fn danger(text: impl Into<WidgetText>) -> Self {
+        Self::new(text).variant(GlassButtonVariant::Danger)
+    }
+
+    /// Sets a minimum button size (defaults to `34` pt tall, `32` pt in the Prism presets).
     pub fn min_size(mut self, min_size: Vec2) -> Self {
-        self.min_size = min_size;
+        self.min_size = Some(min_size);
         self
     }
 
@@ -133,6 +140,10 @@ impl GlassButton {
 impl Widget for GlassButton {
     fn ui(self, ui: &mut Ui) -> Response {
         let theme = PrismTheme::from_ctx(ui.ctx());
+        if theme.surface_style.is_prism() {
+            return self.prism_ui(ui, &theme);
+        }
+        let min_size = self.min_size.unwrap_or(vec2(0.0, 34.0));
         let padding = vec2(16.0, 8.0);
 
         let label_text = match &self.icon {
@@ -146,8 +157,8 @@ impl Widget for GlassButton {
                 .layout_no_wrap(label_text, font_id.clone(), theme.palette.text_primary);
 
         let desired = vec2(
-            (galley.size().x + padding.x * 2.0).max(self.min_size.x),
-            (galley.size().y + padding.y * 2.0).max(self.min_size.y),
+            (galley.size().x + padding.x * 2.0).max(min_size.x),
+            (galley.size().y + padding.y * 2.0).max(min_size.y),
         );
 
         let sense = if self.enabled {
@@ -377,8 +388,12 @@ fn resolve_button_colors(
                 }
             }
         }
-        GlassButtonVariant::Accent => {
-            let base = theme.palette.accent;
+        GlassButtonVariant::Accent | GlassButtonVariant::Danger => {
+            let base = if variant == GlassButtonVariant::Danger {
+                theme.palette.danger
+            } else {
+                theme.palette.accent
+            };
             let fill = if pressed {
                 crate::tokens::blend_colors(base, Color32::BLACK, 0.16)
             } else if hovered {
@@ -401,6 +416,19 @@ fn resolve_button_colors(
             )
         }
         GlassButtonVariant::Secondary => match (theme.surface_style, theme.mode) {
+            // Prism styles never reach this table (see `GlassButton::prism_ui`); fall back to
+            // the classic glass colors if they ever do.
+            (SurfaceStyle::Layered | SurfaceStyle::Frosted, mode) => resolve_button_colors(
+                &PrismTheme {
+                    surface_style: SurfaceStyle::Glass,
+                    mode,
+                    ..theme.clone()
+                },
+                variant,
+                hovered,
+                pressed,
+                selected,
+            ),
             (SurfaceStyle::Minimal, ThemeMode::Light) => {
                 let fill = if selected {
                     crate::tokens::blend_colors(
@@ -524,5 +552,153 @@ fn resolve_button_colors(
                 )
             }
         }
+    }
+}
+
+impl GlassButton {
+    /// Prism-style rendering: flat fills, hairline borders, Inter Medium labels.
+    fn prism_ui(self, ui: &mut Ui, theme: &PrismTheme) -> Response {
+        use super::prism_paint::{control_colors, drop_shadow, fill, shade, top_highlight};
+        use crate::typography::{FontWeight, prism_font};
+
+        let font_id = prism_font(ui.ctx(), self.font_size, FontWeight::Medium);
+        let label_text = match &self.icon {
+            Some(ic) => format!("{ic}  {}", self.text.text()),
+            None => self.text.text().to_owned(),
+        };
+        let galley = ui
+            .painter()
+            .layout_no_wrap(label_text, font_id, theme.palette.text_primary);
+        let min_size = self.min_size.unwrap_or(vec2(0.0, 32.0));
+        let desired = vec2(
+            (galley.size().x + 24.0).max(min_size.x),
+            (galley.size().y + 12.0).max(min_size.y),
+        );
+        let sense = if self.enabled {
+            Sense::click()
+        } else {
+            Sense::hover()
+        };
+        let (rect, response) = ui.allocate_exact_size(desired, sense);
+        if self.enabled && response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if !ui.is_rect_visible(rect) {
+            return response;
+        }
+
+        let hovered = self.enabled && response.hovered();
+        let pressed = self.enabled && response.is_pointer_button_down_on();
+        let radius = if self.pill {
+            rect.height() * 0.5
+        } else {
+            theme.radius.md * theme.radius_scale.clamp(0.0, 2.0)
+        };
+        let alpha = if self.enabled { 1.0 } else { 0.42 };
+        let dark = theme.mode == ThemeMode::Dark;
+        let painter = ui.painter();
+
+        let solid_fill = match (self.custom_tint, self.variant) {
+            (Some(tint), _) => Some(tint),
+            (None, GlassButtonVariant::Primary | GlassButtonVariant::Accent) => {
+                Some(theme.palette.accent)
+            }
+            (None, GlassButtonVariant::Danger) => Some(Color32::from_rgb(220, 38, 38)),
+            _ => None,
+        };
+
+        let text_color = if let Some(base) = solid_fill {
+            let fill_col = if pressed {
+                shade(base, -0.12)
+            } else if hovered {
+                shade(base, 0.08)
+            } else {
+                base
+            };
+            if !pressed {
+                drop_shadow(
+                    painter,
+                    rect,
+                    radius,
+                    egui::Shadow {
+                        offset: [0, 1],
+                        blur: 2,
+                        spread: 0,
+                        color: Color32::from_rgba_unmultiplied(0, 0, 0, if dark { 76 } else { 38 }),
+                    },
+                );
+            }
+            fill(
+                painter,
+                rect,
+                radius,
+                scale_alpha(fill_col, alpha),
+                Color32::TRANSPARENT,
+            );
+            top_highlight(
+                painter,
+                rect,
+                radius,
+                Color32::from_rgba_unmultiplied(255, 255, 255, (46.0 * alpha) as u8),
+            );
+            if self.custom_tint.is_some() || self.variant == GlassButtonVariant::Danger {
+                Color32::WHITE
+            } else {
+                theme.on_accent()
+            }
+        } else if self.variant == GlassButtonVariant::Ghost {
+            let bg = if pressed || self.selected {
+                theme.neutrals.selected
+            } else if hovered {
+                theme.neutrals.hover
+            } else {
+                Color32::TRANSPARENT
+            };
+            fill(painter, rect, radius, bg, Color32::TRANSPARENT);
+            if hovered || self.selected {
+                theme.palette.text_primary
+            } else {
+                theme.palette.text_secondary
+            }
+        } else {
+            let (base, border) = control_colors(theme);
+            let bg = if self.selected {
+                theme.neutrals.control_on
+            } else if pressed {
+                crate::tokens::blend_colors(base, theme.palette.text_primary, 0.02)
+            } else if hovered {
+                crate::tokens::blend_colors(base, theme.palette.text_primary, 0.06)
+            } else {
+                base
+            };
+            if !dark && theme.surface_style == SurfaceStyle::Layered && !pressed {
+                drop_shadow(
+                    painter,
+                    rect,
+                    radius,
+                    egui::Shadow {
+                        offset: [0, 1],
+                        blur: 2,
+                        spread: 0,
+                        color: Color32::from_rgba_unmultiplied(0, 0, 0, 10),
+                    },
+                );
+            }
+            fill(
+                painter,
+                rect,
+                radius,
+                scale_alpha(bg, alpha),
+                scale_alpha(border, alpha),
+            );
+            theme.palette.text_primary
+        };
+
+        let text_pos = pos2(
+            rect.center().x - galley.size().x * 0.5,
+            rect.center().y - galley.size().y * 0.5 + if pressed { 0.5 } else { 0.0 },
+        );
+        painter.galley_with_override_text_color(text_pos, galley, scale_alpha(text_color, alpha));
+        response
     }
 }

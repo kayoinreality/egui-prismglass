@@ -49,7 +49,8 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev \
-            libx11-dev libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev
+            libx11-dev libxcb-shape0-dev libxcb-xfixes0-dev libgtk-3-dev \
+            mesa-vulkan-drivers
 
       - name: Format & Clippy checks
         run: |
@@ -57,7 +58,11 @@ jobs:
           cargo clippy -p egui-prismglass --all-targets --all-features -- -D warnings
 
       - name: Run library tests & doctests
-        run: cargo test -p egui-prismglass --all-features
+        run: |
+          cargo test -p egui-prismglass --all-features --lib
+          cargo test -p egui-prismglass --all-features --doc
+          # GPU tests run on software Vulkan (lavapipe), one at a time like in CI.
+          cargo test -p egui-prismglass --all-features --test wgpu_blur --test visual_regression -- --test-threads=1
 
       - name: Dry-run package verification
         if: github.event_name == 'workflow_dispatch' && inputs.dry_run == true

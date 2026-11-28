@@ -23,7 +23,8 @@ use egui_kittest::Harness;
 use egui_prismglass::blur_wgpu::wgpu::TextureFormat;
 use egui_prismglass::blur_wgpu::{WgpuBlurMetrics, WgpuBlurProvider};
 use egui_prismglass::{
-    AccentPalette, BackdropScene, BlurCapability, GlassCard, GlassElevation, GlassSurfaceTokens,
+    AccentPalette, BackdropScene, BadgeVariant, BlurCapability, GlassBadge, GlassButton, GlassCard,
+    GlassCheckbox, GlassElevation, GlassProgress, GlassSegmented, GlassSurfaceTokens, GlassToggle,
     PrismContextExt, PrismTheme, paint_prism_backdrop_ui,
 };
 use image::RgbaImage;
@@ -1437,5 +1438,78 @@ fn studio_neutral_scene_has_no_diagonal_bar_artifacts() {
     assert!(
         neutral_var < 80.0 && silk_var > neutral_var * 8.0,
         "StudioNeutral must be calm and free of high-contrast diagonal bars (neutral_var={neutral_var:.1}, silk_var={silk_var:.1})"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 7. Prism presets: Layered (solid content) vs Frosted (all glass) materials
+// ---------------------------------------------------------------------------
+
+/// Two equal cards over different regions of the Aurora backdrop, plus a row of Prism controls.
+fn prism_fixture(theme: PrismTheme) -> RgbaImage {
+    render_fixture(384, 240, 1.0, theme, |ui, theme| {
+        // Prism widgets use the bundled Inter (this also gives the harness a font at all).
+        egui_prismglass::install_fonts(ui.ctx());
+        theme.apply(ui.ctx());
+        for (idx, x) in [16.0_f32, 200.0].into_iter().enumerate() {
+            Area::new(Id::NULL.with(("prism_card", idx)))
+                .fixed_pos(pos2(x, 16.0))
+                .show(ui.ctx(), |ui| {
+                    GlassCard::new()
+                        .elevation(GlassElevation::Elevated)
+                        .padding(Margin::same(0))
+                        .show(ui, |ui| {
+                            ui.allocate_exact_size(vec2(168.0, 96.0), egui::Sense::hover());
+                        });
+                });
+        }
+        Area::new(Id::NULL.with("prism_controls"))
+            .fixed_pos(pos2(16.0, 128.0))
+            .show(ui.ctx(), |ui| {
+                ui.set_width(352.0);
+                ui.horizontal(|ui| {
+                    ui.add(GlassButton::primary("Save"));
+                    ui.add(GlassButton::secondary("Cancel"));
+                    let mut on = true;
+                    ui.add(GlassToggle::new(&mut on)).accessible_name("Enabled");
+                    let mut checked = true;
+                    ui.add(GlassCheckbox::new(&mut checked))
+                        .accessible_name("Selected");
+                    ui.add(GlassBadge::new("Done").variant(BadgeVariant::Success));
+                });
+                let mut selected = 1;
+                ui.add(GlassSegmented::new(
+                    &mut selected,
+                    &["Day", "Week", "Month"],
+                ));
+                ui.add(GlassProgress::new(0.4).width(352.0));
+            });
+    })
+}
+
+#[test]
+fn prism_materials_match_golden_and_invariants() {
+    let layered = prism_fixture(PrismTheme::prism_dark());
+    assert_matches_golden("prism_dark_layered", &layered);
+    let frosted =
+        prism_fixture(PrismTheme::prism_glass_light().with_accent_palette(AccentPalette::Emerald));
+    assert_matches_golden("prism_glass_light_frosted", &frosted);
+
+    // Layered: content cards are solid, so both cards are identical whatever lies beneath.
+    let left = mean_rgb(&layered, 40, 40, 100, 40);
+    let right = mean_rgb(&layered, 224, 40, 100, 40);
+    let diff: f64 = left.iter().zip(right).map(|(a, b)| (a - b).abs()).sum();
+    assert!(
+        diff < 1.5,
+        "Layered cards should be opaque and identical, diff={diff:.2}"
+    );
+
+    // Frosted: the same cards are glass, so they pick up different backdrop light pools.
+    let left = mean_rgb(&frosted, 40, 40, 100, 40);
+    let right = mean_rgb(&frosted, 224, 40, 100, 40);
+    let diff: f64 = left.iter().zip(right).map(|(a, b)| (a - b).abs()).sum();
+    assert!(
+        diff > 6.0,
+        "Frosted cards should show the backdrop through the glass, diff={diff:.2}"
     );
 }

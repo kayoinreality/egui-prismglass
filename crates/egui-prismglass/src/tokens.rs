@@ -40,6 +40,10 @@ pub enum BackdropScene {
     /// Clean, distraction-free architectural studio gradient with no diagonal bars, waves, or grid.
     /// Ideal for pro workstations, streaming studios, DAWs, and video editors.
     StudioNeutral,
+    /// Soft multi-color aurora wallpaper (violet, blue, teal and pink light pools). The default
+    /// scene of the Prism presets: gives glass sidebars and popovers colorful light to frost
+    /// without competing with content.
+    Aurora,
     /// Disables the procedural backdrop completely. `paint_prism_backdrop_ui` becomes a no-op and
     /// `blur-wgpu` automatically switches glass surfaces to real GPU alpha-blended translucent
     /// overlays over live `egui` content unless an external GPU/RGBA8 backdrop is installed.
@@ -54,6 +58,7 @@ impl BackdropScene {
             Self::LiquidPrism => "Liquid Prism",
             Self::ArchitecturalGrid => "Studio Grid",
             Self::StudioNeutral => "Studio Neutral",
+            Self::Aurora => "Aurora",
             Self::None => "None",
         }
     }
@@ -66,6 +71,7 @@ impl BackdropScene {
             Self::ArchitecturalGrid => 2,
             Self::StudioNeutral => 3,
             Self::None => 4,
+            Self::Aurora => 5,
         }
     }
 }
@@ -156,6 +162,24 @@ impl AccentPalette {
             (Self::Magenta, true) => Color32::from_rgb(236, 78, 178),
             (Self::Graphite, false) => Color32::from_rgb(24, 26, 32),
             (Self::Graphite, true) => Color32::from_rgb(238, 241, 248),
+        }
+    }
+
+    /// Accent calibrated for the Prism presets ([`crate::PrismTheme::prism_dark`] and friends).
+    ///
+    /// Every color keeps at least 4.5:1 contrast against white label text (Graphite in dark
+    /// mode flips to a light fill with dark text instead), so solid accent buttons stay legible.
+    pub fn prism(self, is_dark: bool) -> Color32 {
+        match (self, is_dark) {
+            (Self::Cobalt, _) => Color32::from_rgb(79, 91, 255),
+            (Self::Violet, _) => Color32::from_rgb(124, 58, 237),
+            (Self::Emerald, _) => Color32::from_rgb(13, 127, 98),
+            (Self::Ruby, _) => Color32::from_rgb(214, 48, 74),
+            (Self::Amber, _) => Color32::from_rgb(194, 65, 12),
+            (Self::Cyan, _) => Color32::from_rgb(8, 120, 168),
+            (Self::Magenta, _) => Color32::from_rgb(190, 42, 168),
+            (Self::Graphite, false) => Color32::from_rgb(24, 24, 27),
+            (Self::Graphite, true) => Color32::from_rgb(237, 237, 240),
         }
     }
 
@@ -268,6 +292,72 @@ pub struct PrismPalette {
     pub warning: Color32,
     /// Semantic danger / error color.
     pub danger: Color32,
+}
+
+/// Neutral interface colors shared by controls (segmented controls, inputs, tracks, rows).
+///
+/// The Prism presets define these from a 12-step gray ramp; the classic presets derive them
+/// from their palette so newer widgets ([`crate::GlassSegmented`], [`crate::GlassProgress`])
+/// work with every theme.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
+pub struct PrismNeutrals {
+    /// Main content background (solid panels in the Layered style).
+    pub surface: Color32,
+    /// Slightly raised fill: inputs, secondary buttons, stat strips, segmented tracks.
+    pub raised: Color32,
+    /// Recessed fill: slider rails, progress tracks, switches in the off state.
+    pub sunken: Color32,
+    /// The selected segment of a segmented control.
+    pub control_on: Color32,
+    /// Default hairline border.
+    pub border: Color32,
+    /// Stronger hairline for interactive controls and dividers inside floating layers.
+    pub border_strong: Color32,
+    /// Hover overlay for rows and ghost buttons.
+    pub hover: Color32,
+    /// Selected row / navigation item overlay.
+    pub selected: Color32,
+    /// De-emphasized status color (e.g. a queued item's dot).
+    pub muted: Color32,
+}
+
+impl PrismNeutrals {
+    /// Neutral ramp of the Prism dark presets.
+    pub const DARK: Self = Self {
+        surface: Color32::from_rgb(17, 17, 20),
+        raised: Color32::from_rgb(23, 23, 27),
+        sunken: Color32::from_rgb(34, 34, 40),
+        control_on: Color32::from_rgb(42, 42, 49),
+        border: Color32::from_rgba_premultiplied(18, 18, 18, 18),
+        border_strong: Color32::from_rgba_premultiplied(31, 31, 31, 31),
+        hover: Color32::from_rgba_premultiplied(10, 10, 10, 10),
+        selected: Color32::from_rgba_premultiplied(20, 20, 20, 20),
+        muted: Color32::from_rgb(92, 92, 102),
+    };
+
+    /// Neutral ramp of the Prism light presets.
+    pub const LIGHT: Self = Self {
+        surface: Color32::from_rgb(255, 255, 255),
+        raised: Color32::from_rgb(247, 247, 248),
+        sunken: Color32::from_rgb(236, 236, 239),
+        control_on: Color32::from_rgb(255, 255, 255),
+        border: Color32::from_rgba_premultiplied(0, 0, 0, 18),
+        border_strong: Color32::from_rgba_premultiplied(0, 0, 0, 31),
+        hover: Color32::from_rgba_premultiplied(0, 0, 0, 8),
+        selected: Color32::from_rgba_premultiplied(0, 0, 0, 15),
+        muted: Color32::from_rgb(196, 196, 204),
+    };
+
+    /// Derives neutrals for a classic preset from its canvas and text colors.
+    pub fn derived(is_dark: bool, palette: &PrismPalette) -> Self {
+        let base = if is_dark { Self::DARK } else { Self::LIGHT };
+        Self {
+            surface: palette.canvas,
+            muted: palette.text_muted,
+            ..base
+        }
+    }
 }
 
 /// Complete optical material definition for a single glass or minimal surface.

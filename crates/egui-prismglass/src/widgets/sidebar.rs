@@ -125,6 +125,16 @@ pub enum SidebarIcon {
     Tokens,
     /// Sliders / settings bars (ideal for Inspector / Preferences).
     Sliders,
+    /// Bulleted list (ideal for queues, inboxes, tasks).
+    List,
+    /// Stacked layers (ideal for Assets / Libraries).
+    Layers,
+    /// Clock face (ideal for History / Recent).
+    Clock,
+    /// Line chart on axes (ideal for Usage / Analytics).
+    Chart,
+    /// Folder (ideal for Projects / Files).
+    Folder,
 }
 
 /// A selectable glass navigation row designed for use inside [`GlassSidebar`].
@@ -170,6 +180,9 @@ impl<'a> SidebarItem<'a> {
     /// Renders the navigation item across the available width of the sidebar.
     pub fn show(self, ui: &mut Ui) -> Response {
         let theme = PrismTheme::from_ctx(ui.ctx());
+        if theme.surface_style.is_prism() {
+            return self.prism_show(ui, &theme);
+        }
         let width = ui.available_width();
         let height = 38.0;
         let (rect, response) = ui.allocate_exact_size(vec2(width, height), Sense::click());
@@ -198,6 +211,11 @@ impl<'a> SidebarItem<'a> {
                         Color32::from_rgba_unmultiplied(255, 255, 255, 22),
                         Color32::from_rgba_unmultiplied(255, 255, 255, 36),
                         Color32::from_rgba_unmultiplied(255, 255, 255, 14),
+                    ),
+                    (SurfaceStyle::Layered | SurfaceStyle::Frosted, _) => (
+                        theme.neutrals.selected,
+                        Color32::TRANSPARENT,
+                        Color32::TRANSPARENT,
                     ),
                     (SurfaceStyle::Glass, ThemeMode::Light) => (
                         Color32::from_rgba_unmultiplied(255, 255, 255, 215),
@@ -295,13 +313,93 @@ impl<'a> SidebarItem<'a> {
     }
 }
 
+impl SidebarItem<'_> {
+    /// Prism-style navigation row: 32pt tall, neutral selection fill, Inter Medium label and a
+    /// plain trailing count instead of a pill.
+    fn prism_show(self, ui: &mut Ui, theme: &PrismTheme) -> Response {
+        use crate::typography::{FontWeight, prism_font, prism_numeric_font};
+
+        let width = ui.available_width();
+        let (rect, response) = ui.allocate_exact_size(vec2(width, 32.0), Sense::click());
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        let label = self.label;
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(egui::Role::Button, true, self.selected, label)
+        });
+        if !ui.is_rect_visible(rect) {
+            return response;
+        }
+        let painter = ui.painter();
+        let hovered = response.hovered();
+        let radius = theme.radius.md * theme.radius_scale.clamp(0.0, 2.0);
+        let bg = if self.selected {
+            theme.neutrals.selected
+        } else if hovered {
+            theme.neutrals.hover
+        } else {
+            Color32::TRANSPARENT
+        };
+        if bg.a() > 0 {
+            painter.rect_filled(rect, CornerRadius::same(radius.round() as u8), bg);
+        }
+        let color = if self.selected || hovered {
+            theme.palette.text_primary
+        } else {
+            theme.palette.text_secondary
+        };
+        let icon_center = pos2(rect.min.x + 18.0, rect.center().y);
+        if let Some(glyph) = self.custom_glyph {
+            painter.text(
+                icon_center,
+                Align2::CENTER_CENTER,
+                glyph,
+                FontId::proportional(14.0),
+                color,
+            );
+        } else {
+            paint_icon(painter, icon_center, self.icon, color, 1.5);
+        }
+        painter.text(
+            pos2(rect.min.x + 36.0, rect.center().y),
+            Align2::LEFT_CENTER,
+            self.label,
+            prism_font(ui.ctx(), 13.0, FontWeight::Medium),
+            color,
+        );
+        if let Some(badge) = self.badge {
+            painter.text(
+                pos2(rect.max.x - 10.0, rect.center().y),
+                Align2::RIGHT_CENTER,
+                badge,
+                prism_numeric_font(ui.ctx(), 12.0, FontWeight::Regular),
+                theme.palette.text_secondary,
+            );
+        }
+        response
+    }
+}
+
 fn paint_sidebar_icon(
     painter: &egui::Painter,
     center: egui::Pos2,
     icon: SidebarIcon,
     color: Color32,
 ) {
-    let stroke = Stroke::new(1.4, color);
+    paint_icon(painter, center, icon, color, 1.4);
+}
+
+/// Paints a built-in [`SidebarIcon`] centered at `center` (about 13pt across).
+pub(crate) fn paint_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    icon: SidebarIcon,
+    color: Color32,
+    stroke_width: f32,
+) {
+    let stroke = Stroke::new(stroke_width, color);
+    let p = |dx: f32, dy: f32| pos2(center.x + dx, center.y + dy);
     match icon {
         SidebarIcon::Prism => {
             let pts = vec![
@@ -337,6 +435,56 @@ fn paint_sidebar_icon(
                 painter.line_segment([pos2(center.x - 5.5, y), pos2(center.x + 5.5, y)], stroke);
                 painter.circle_filled(pos2(center.x + knob_dx, y), 1.9, color);
             }
+        }
+        SidebarIcon::List => {
+            for dy in [-4.5_f32, 0.0, 4.5] {
+                painter.circle_filled(p(-5.0, dy), 1.1, color);
+                painter.line_segment([p(-2.0, dy), p(6.5, dy)], stroke);
+            }
+        }
+        SidebarIcon::Layers => {
+            painter.add(egui::Shape::closed_line(
+                vec![p(0.0, -6.5), p(6.5, -3.0), p(0.0, 0.5), p(-6.5, -3.0)],
+                stroke,
+            ));
+            painter.add(egui::Shape::line(
+                vec![p(-6.5, 0.5), p(0.0, 4.0), p(6.5, 0.5)],
+                stroke,
+            ));
+            painter.add(egui::Shape::line(
+                vec![p(-6.5, 3.5), p(0.0, 7.0), p(6.5, 3.5)],
+                stroke,
+            ));
+        }
+        SidebarIcon::Clock => {
+            painter.circle_stroke(center, 6.5, stroke);
+            painter.add(egui::Shape::line(
+                vec![p(0.0, -3.8), p(0.0, 0.0), p(2.8, 1.8)],
+                stroke,
+            ));
+        }
+        SidebarIcon::Chart => {
+            painter.add(egui::Shape::line(
+                vec![p(-6.5, -6.5), p(-6.5, 6.5), p(6.5, 6.5)],
+                stroke,
+            ));
+            painter.add(egui::Shape::line(
+                vec![p(-4.0, 2.5), p(-1.0, -0.5), p(1.5, 2.0), p(5.5, -3.0)],
+                stroke,
+            ));
+        }
+        SidebarIcon::Folder => {
+            painter.add(egui::Shape::closed_line(
+                vec![
+                    p(-6.5, -5.0),
+                    p(-2.0, -5.0),
+                    p(-0.5, -3.0),
+                    p(6.5, -3.0),
+                    p(6.5, 5.5),
+                    p(-6.5, 5.5),
+                ],
+                stroke,
+            ));
         }
     }
 }
