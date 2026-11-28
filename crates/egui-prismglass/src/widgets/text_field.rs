@@ -193,9 +193,14 @@ impl Widget for GlassTextField<'_> {
         let width = self.width.unwrap_or_else(|| ui.available_width()).max(40.0);
         let font = prism_font(&ctx, 13.0, FontWeight::Regular);
 
-        ui.vertical(|ui| {
-            ui.set_width(width);
-            ui.spacing_mut().item_spacing.y = 5.0;
+        // Only stack vertically when there is a label or a message, so a bare field keeps the
+        // parent layout's alignment (e.g. vertically centered in a toolbar row).
+        let stacked = self.label.is_some() || self.help.is_some() || self.error.is_some();
+        let body = |ui: &mut Ui| {
+            if stacked {
+                ui.set_width(width);
+                ui.spacing_mut().item_spacing.y = 5.0;
+            }
             let label_id = self.label.as_ref().map(|label| {
                 ui.label(
                     egui::RichText::new(label)
@@ -314,8 +319,12 @@ impl Widget for GlassTextField<'_> {
                 );
             }
             response
-        })
-        .inner
+        };
+        if stacked {
+            ui.vertical(body).inner
+        } else {
+            body(ui)
+        }
     }
 }
 
