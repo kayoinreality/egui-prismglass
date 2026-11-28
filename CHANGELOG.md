@@ -7,9 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Planned
-- Additional widgets: `GlassTextField`, `GlassModal`, `GlassToast`, menus and popovers
-- Interactive WebAssembly live playground
+## [0.4.0] - 2026-11-28
+
+### Added
+- **`GlassTextField`**: single-line and multiline (`GlassTextField::multiline`) input on `egui::TextEdit` with placeholder, leading `Icon`, label, help text, focus ring, error state (`.error(Some("…"))` with a message), disabled state, password masking, `width`, `rows`, `char_limit` and `id_salt`. Returns the inner `TextEdit` response.
+- **`GlassModal`** on `egui::Modal`: dimming scrim, focus kept inside the dialog (widgets behind it are not interactive), `Esc` and scrim click close it (both configurable), optional × button, title / description / icon header, `GlassModal::footer` for right-aligned actions, closing from inside with `ui.close()`. Returns `GlassModalResponse { inner, response, closed }`.
+- **`GlassToasts` / `Toast`**: a queue of notifications with `Info` / `Success` / `Warning` / `Danger` variants (`ToastVariant`), auto-dismiss with a progress bar (`duration`, `sticky`), pause on hover, close button, enter/exit animation, stacking in any corner (`ToastAnchor`), `max_visible` (the rest wait in the queue with their timers stopped), `dismiss(ToastId)`, and `reduce_motion`.
+- **`GlassMenu`, `MenuItem`, `GlassPopover`** on `egui::Popup`: dropdown (`GlassMenu::new`) and context (`GlassMenu::context`) menus with icons, shortcuts, check marks, danger items, disabled items, `GlassMenu::separator`, `GlassMenu::section` titles and `GlassMenu::submenu` (on `egui::containers::menu::SubMenu`); popovers with free-form content (`GlassPopover::new` / `open_bool` / `from_popup`). Both paint the theme's floating glass and keep egui's keyboard navigation and close behavior.
+- **`Icon`** (module `icons`): 65 vector icons painted with `egui::Painter` on a 16 pt grid with a 1.5 pt stroke — the 46 icons of PrismCast Studio plus `Search`, `Info`, `Warning`, `AlertCircle`, `CheckCircle`, `List`, `Clock`, `Chart`, `More`, `Copy`, `Edit`, `Filter`, `Play`, `User`, `Bell`, `Home`, `Upload`, `Menu` and `Prism`. `Icon::paint`, `paint_icon`, `Icon::ALL`, `Icon::name`, the `GlassIcon` widget and `From<SidebarIcon> for Icon`.
+- **Kit components** (module `widgets::kit`): `GlassListRow` (clickable row with hover/selection, leading selection marker, icon / title / subtitle / trailing text or custom contents), `GlassChip` (tinted uppercase chip, optional icon, filter-toggle mode), `GlassKbd` (key caps, `GlassKbd::combo`), `GlassEmptyState` (icon, title, description, actions) and `SectionHeader` (uppercase tracked title, count, actions), plus `eyebrow_text`.
+- `GlassButton::icon` accepts an `Icon` (via the new `ButtonIcon`); `GlassButton::icon_only(Icon)` for square ghost icon buttons.
+- `SidebarItem::icon(Icon)` and `SidebarItem::with_icon(Icon, label)`.
+- `GlassSegmented::optional_counts(&[Option<u32>])`: per-segment counts where `None` shows nothing instead of `0`.
+- **Live web demo**: the demo builds for `wasm32-unknown-unknown` with trunk (`crates/demo/index.html`) and is deployed to GitHub Pages by `.github/workflows/pages.yml`; CI checks the wasm32 build of the library and the demo.
+- **Prism Studio**: a new **Components** page showing every v0.4 widget; the render queue now uses `GlassTextField` for search, menus for Filter and Sort, a confirmation `GlassModal` for Cancel, toasts, vector icons in the sidebar, and hides zero filter counts.
+- Tests: unit tests for every new widget (typing into a text field, modal Esc / blocked background, menu open / Esc close, popover click-outside, toast queue timing and dismissal, list row sizes) and three new golden snapshots in `visual_regression` (`v04_controls_prism_dark`, `v04_controls_prism_light`, `v04_overlays_prism_glass_dark`) plus a scrim invariant.
+
+### Changed
+- **API**: `GlassButton::icon` now takes `impl Into<ButtonIcon>` instead of `impl Into<String>`. `&str` and `String` arguments compile unchanged; other `Into<String>` types (`Cow<str>`, `Box<str>`, …) need `.to_string()`.
+- The demo's native entry point and blur-provider setup moved into a shared `create_app` used by both the native and web launchers.
+
+### Unchanged
+- All existing golden snapshots (classic presets and v0.3 Prism materials) render identically.
 
 ## [0.3.0] - 2026-11-28
 

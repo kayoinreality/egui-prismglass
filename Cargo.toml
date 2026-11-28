@@ -6,7 +6,7 @@ members = [
 ]
 
 [workspace.package]
-version = "0.3.0"
+version = "0.4.0"
 edition = "2024"
 rust-version = "1.95"
 license = "MIT"
@@ -28,7 +28,7 @@ bytemuck = { version = "1.25", features = ["derive"] }
 backdrop-blur-core = "0.2.0"
 backdrop-blur-glow = "0.2.0"
 serde = { version = "1.0", features = ["derive"] }
-egui-prismglass = { version = "0.3.0", path = "crates/egui-prismglass" }
+egui-prismglass = { version = "0.4.0", path = "crates/egui-prismglass" }
 
 [workspace.lints.rust]
 unsafe_code = "forbid"
