@@ -226,7 +226,13 @@ impl<'a> GlassMenu<'a> {
     /// A hairline separator between groups of items.
     pub fn separator(ui: &mut Ui) {
         let theme = PrismTheme::from_ctx(ui.ctx());
-        let (rect, _) = ui.allocate_exact_size(vec2(ui.available_width(), 9.0), Sense::hover());
+        // Like `egui::Separator`: take no width in the sizing pass so the menu keeps its width.
+        let width = if ui.is_sizing_pass() {
+            0.0
+        } else {
+            ui.available_width()
+        };
+        let (rect, _) = ui.allocate_exact_size(vec2(width, 9.0), Sense::hover());
         ui.painter().hline(
             rect.x_range().shrink(4.0),
             rect.center().y,

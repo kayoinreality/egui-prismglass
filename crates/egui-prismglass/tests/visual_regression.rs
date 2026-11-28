@@ -24,8 +24,10 @@ use egui_prismglass::blur_wgpu::wgpu::TextureFormat;
 use egui_prismglass::blur_wgpu::{WgpuBlurMetrics, WgpuBlurProvider};
 use egui_prismglass::{
     AccentPalette, BackdropScene, BadgeVariant, BlurCapability, GlassBadge, GlassButton, GlassCard,
-    GlassCheckbox, GlassElevation, GlassProgress, GlassSegmented, GlassSurfaceTokens, GlassToggle,
-    PrismContextExt, PrismTheme, paint_prism_backdrop_ui,
+    GlassCheckbox, GlassChip, GlassElevation, GlassEmptyState, GlassIcon, GlassKbd, GlassListRow,
+    GlassMenu, GlassModal, GlassPanel, GlassProgress, GlassSegmented, GlassSurfaceTokens,
+    GlassTextField, GlassToasts, GlassToggle, Icon, MenuItem, PrismContextExt, PrismTheme,
+    SectionHeader, Toast, paint_prism_backdrop_ui,
 };
 use image::RgbaImage;
 
@@ -1511,5 +1513,206 @@ fn prism_materials_match_golden_and_invariants() {
     assert!(
         diff > 6.0,
         "Frosted cards should show the backdrop through the glass, diff={diff:.2}"
+    );
+}
+
+// ---------------------------------------------------------------------------
+// 8. v0.4 widgets: inputs, kit components, icons and floating layers
+// ---------------------------------------------------------------------------
+
+/// Like [`render_fixture`] but runs `steps` frames, so popups and areas finish their sizing pass.
+fn render_fixture_steps(
+    width: u32,
+    height: u32,
+    theme: PrismTheme,
+    steps: usize,
+    mut draw: impl FnMut(&mut egui::Ui, &PrismTheme) + 'static,
+) -> RgbaImage {
+    let _gpu = lock_gpu();
+    let mut installed = false;
+    let mut harness = Harness::builder()
+        .with_size(vec2(width as f32, height as f32))
+        .with_pixels_per_point(1.0)
+        .build_ui(move |ui| {
+            if !installed {
+                egui_prismglass::blur_wgpu::install_with_format(
+                    ui.ctx(),
+                    TextureFormat::Rgba8Unorm,
+                );
+                egui_prismglass::install_fonts(ui.ctx());
+                installed = true;
+            }
+            ui.ctx().set_prism_theme(theme.clone());
+            paint_prism_backdrop_ui(ui, ui.max_rect(), &theme, 0.0, 1.0);
+            draw(ui, &theme);
+        });
+    for _ in 0..steps {
+        harness.step();
+    }
+    harness
+        .render()
+        .expect("headless wgpu fixture should render")
+}
+
+/// Text fields in every state, icon buttons, optional segment counts, list rows, chips, key
+/// caps, a section header, an empty state and a strip of icons, on a Layered panel.
+fn v04_controls_fixture(theme: PrismTheme) -> RgbaImage {
+    let mut query = String::new();
+    let mut key = String::from("abc");
+    let mut name = String::from("Main camera");
+    let mut disabled = String::from("rtmp://live.example");
+    let mut notes = String::from("Two lines\nof notes");
+    let mut tab = 0_usize;
+    let mut first = true;
+    render_fixture_steps(520, 400, theme, 3, move |ui, _theme| {
+        Area::new(Id::NULL.with("v04_controls"))
+            .fixed_pos(pos2(12.0, 12.0))
+            .show(ui.ctx(), |ui| {
+                GlassPanel::new()
+                    .fill_width(false)
+                    .padding(Margin::same(12))
+                    .show(ui, |ui| {
+                        ui.set_width(472.0);
+                        ui.horizontal_top(|ui| {
+                            ui.vertical(|ui| {
+                                ui.set_width(228.0);
+                                ui.add(
+                                    GlassTextField::new(&mut query)
+                                        .placeholder("Search sources")
+                                        .icon(Icon::Search),
+                                );
+                                let r = ui
+                                    .add(GlassTextField::new(&mut name).icon(Icon::Camera))
+                                    .accessible_name("Source name");
+                                if first {
+                                    r.request_focus();
+                                    first = false;
+                                }
+                                ui.add(
+                                    GlassTextField::new(&mut key)
+                                        .label("Stream key")
+                                        .password(true)
+                                        .icon(Icon::Key)
+                                        .error(Some("At least 8 characters")),
+                                );
+                                ui.add(GlassTextField::new(&mut disabled).enabled(false))
+                                    .accessible_name("Server");
+                                ui.add(GlassTextField::multiline(&mut notes).rows(2))
+                                    .accessible_name("Notes");
+                            });
+                            ui.add_space(8.0);
+                            ui.vertical(|ui| {
+                                ui.set_width(228.0);
+                                ui.add(SectionHeader::new("Sources").count(3));
+                                ui.add(
+                                    GlassListRow::new()
+                                        .icon(Icon::Camera)
+                                        .title("Main camera")
+                                        .trailing("1080p")
+                                        .selected(true),
+                                );
+                                ui.add(
+                                    GlassListRow::new()
+                                        .icon(Icon::Monitor)
+                                        .title("Display 2")
+                                        .subtitle("2560×1440"),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.add(GlassChip::new("rtmp"));
+                                    ui.add(
+                                        GlassChip::new("Live")
+                                            .color(Color32::from_rgb(220, 38, 38)),
+                                    );
+                                    ui.add(
+                                        GlassChip::new("Filter").icon(Icon::Filter).selected(true),
+                                    );
+                                    ui.add(GlassKbd::combo(["Ctrl", "K"]));
+                                });
+                                ui.add(
+                                    GlassSegmented::new(&mut tab, &["All", "Errors", "Done"])
+                                        .optional_counts(&[Some(12), None, Some(3)]),
+                                );
+                                ui.horizontal(|ui| {
+                                    ui.add(GlassButton::primary("Add").icon(Icon::Plus));
+                                    ui.add(GlassButton::secondary("Export").icon(Icon::Download));
+                                    ui.add(GlassButton::icon_only(Icon::More));
+                                });
+                                ui.horizontal_wrapped(|ui| {
+                                    for icon in Icon::ALL.iter().take(20) {
+                                        ui.add(GlassIcon::new(*icon).size(14.0));
+                                    }
+                                });
+                                ui.add(
+                                    GlassEmptyState::new(Icon::Layers, "No scenes")
+                                        .description("Create one to start."),
+                                );
+                            });
+                        });
+                    });
+            });
+    })
+}
+
+/// A modal over the Aurora backdrop, an open menu with a submenu row and a stack of toasts.
+fn v04_overlays_fixture(theme: PrismTheme) -> RgbaImage {
+    let mut toasts = GlassToasts::new().reduce_motion(true).width(260.0);
+    toasts.add(Toast::success("Scene saved").body("Intro · 4 sources"));
+    toasts.add(Toast::danger("Stream disconnected").sticky());
+    let mut modal_open = true;
+    render_fixture_steps(640, 420, theme, 4, move |ui, _theme| {
+        let anchor = ui.put(
+            Rect::from_min_size(pos2(16.0, 16.0), vec2(90.0, 30.0)),
+            GlassButton::secondary("File").icon(Icon::Folder),
+        );
+        let _ = GlassMenu::from_popup(egui::Popup::menu(&anchor).open(true)).show(|ui| {
+            ui.add(
+                MenuItem::new("New scene")
+                    .icon(Icon::Plus)
+                    .shortcut("Ctrl+N"),
+            );
+            ui.add(
+                MenuItem::new("Duplicate")
+                    .icon(Icon::Copy)
+                    .shortcut("Ctrl+D"),
+            );
+            ui.add(MenuItem::new("Snap to grid").checked(true));
+            GlassMenu::submenu(ui, MenuItem::new("Export").icon(Icon::Download), |ui| {
+                ui.add(MenuItem::new("PNG"));
+            });
+            GlassMenu::separator(ui);
+            ui.add(MenuItem::new("Delete").icon(Icon::Trash).danger(true));
+        });
+        let _ = GlassModal::new("snapshot")
+            .title("Delete scene?")
+            .description("“Intro” and its 4 sources will be removed.")
+            .icon(Icon::Trash)
+            .width(320.0)
+            .show(ui.ctx(), &mut modal_open, |ui| {
+                GlassModal::footer(ui, |ui| {
+                    ui.add(GlassButton::danger("Delete"));
+                    ui.add(GlassButton::secondary("Cancel"));
+                });
+            });
+        toasts.show(ui.ctx());
+    })
+}
+
+#[test]
+fn v04_widgets_match_golden() {
+    let controls = v04_controls_fixture(PrismTheme::prism_dark());
+    assert_matches_golden("v04_controls_prism_dark", &controls);
+    let controls_light =
+        v04_controls_fixture(PrismTheme::prism_light().with_accent_palette(AccentPalette::Violet));
+    assert_matches_golden("v04_controls_prism_light", &controls_light);
+    let overlays = v04_overlays_fixture(PrismTheme::prism_glass_dark());
+    assert_matches_golden("v04_overlays_prism_glass_dark", &overlays);
+
+    // The modal scrim darkens the backdrop around the dialog.
+    let plain = render_fixture_steps(640, 420, PrismTheme::prism_glass_dark(), 4, |_, _| {});
+    let dimmed = mean_rgb(&overlays, 560, 40, 60, 40);
+    let bright = mean_rgb(&plain, 560, 40, 60, 40);
+    assert!(
+        dimmed.iter().sum::<f64>() < bright.iter().sum::<f64>() - 6.0,
+        "the modal scrim should dim the screen (dimmed={dimmed:?}, plain={bright:?})"
     );
 }

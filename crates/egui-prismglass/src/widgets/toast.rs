@@ -210,6 +210,7 @@ pub struct GlassToasts {
     width: f32,
     margin: Vec2,
     spacing: f32,
+    reduce_motion: bool,
     last_time: Option<f64>,
 }
 
@@ -230,6 +231,7 @@ impl GlassToasts {
             width: 340.0,
             margin: vec2(16.0, 16.0),
             spacing: 8.0,
+            reduce_motion: false,
             last_time: None,
         }
     }
@@ -255,6 +257,13 @@ impl GlassToasts {
     /// Distance from the screen edges (default `16 × 16`).
     pub fn margin(mut self, margin: Vec2) -> Self {
         self.margin = margin;
+        self
+    }
+
+    /// Shows and hides toasts without fade / slide animations (for users who prefer reduced
+    /// motion, and for deterministic screenshots).
+    pub fn reduce_motion(mut self, reduce: bool) -> Self {
+        self.reduce_motion = reduce;
         self
     }
 
@@ -338,7 +347,11 @@ impl GlassToasts {
         let visible = self.toasts.len().min(self.max_visible);
         for toast in self.toasts.iter_mut().take(visible) {
             // Timers: appear → live (paused while hovered) → leaving.
-            toast.appear = (toast.appear + dt / APPEAR_SECS).min(1.0);
+            toast.appear = if self.reduce_motion {
+                1.0
+            } else {
+                (toast.appear + dt / APPEAR_SECS).min(1.0)
+            };
             let pos_y = if is_top {
                 screen.top() + self.margin.y + offset
             } else {
@@ -352,7 +365,11 @@ impl GlassToasts {
             let rect = Rect::from_min_size(pos2(x, pos_y), vec2(width, toast.height));
             let hovered = pointer.is_some_and(|p| rect.contains(p));
             if let Some(l) = toast.leaving.as_mut() {
-                *l += dt / LEAVE_SECS;
+                *l = if self.reduce_motion {
+                    1.0
+                } else {
+                    *l + dt / LEAVE_SECS
+                };
             } else if let Some(d) = toast.duration {
                 if !hovered {
                     toast.elapsed += dt;

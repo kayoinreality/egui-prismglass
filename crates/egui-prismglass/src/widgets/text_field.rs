@@ -227,12 +227,11 @@ impl Widget for GlassTextField<'_> {
             let mut edit = if self.multiline {
                 TextEdit::multiline(self.text).desired_rows(self.rows)
             } else {
-                TextEdit::singleline(self.text)
+                TextEdit::singleline(self.text).align(egui::Align2::LEFT_CENTER)
             };
             edit = edit
-                .frame(Frame::NONE)
-                .margin(margin)
-                .background_color(Color32::TRANSPARENT)
+                // With an explicit frame `TextEdit` ignores `.margin()`, so pad via the frame.
+                .frame(Frame::NONE.inner_margin(margin))
                 .font(font)
                 .text_color(theme.palette.text_primary)
                 .hint_text(hint)
