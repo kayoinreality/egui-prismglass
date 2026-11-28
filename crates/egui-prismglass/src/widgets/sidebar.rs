@@ -141,6 +141,7 @@ pub enum SidebarIcon {
 #[derive(Debug, Clone)]
 pub struct SidebarItem<'a> {
     icon: SidebarIcon,
+    vector_icon: Option<crate::icons::Icon>,
     custom_glyph: Option<&'a str>,
     label: &'a str,
     badge: Option<&'a str>,
@@ -152,11 +153,24 @@ impl<'a> SidebarItem<'a> {
     pub fn new(icon: SidebarIcon, label: &'a str) -> Self {
         Self {
             icon,
+            vector_icon: None,
             custom_glyph: None,
             label,
             badge: None,
             selected: false,
         }
+    }
+
+    /// Creates a new [`SidebarItem`] showing an [`Icon`](crate::Icon) from the shared icon set.
+    pub fn with_icon(icon: crate::icons::Icon, label: &'a str) -> Self {
+        Self::new(SidebarIcon::default(), label).icon(icon)
+    }
+
+    /// Uses an [`Icon`](crate::Icon) from the shared vector set instead of the built-in
+    /// [`SidebarIcon`] (a custom glyph still takes precedence).
+    pub fn icon(mut self, icon: crate::icons::Icon) -> Self {
+        self.vector_icon = Some(icon);
+        self
     }
 
     /// Overrides the vector icon with a custom text glyph (must be present in the active font).
@@ -265,6 +279,12 @@ impl<'a> SidebarItem<'a> {
                     FontId::proportional(14.0),
                     icon_col,
                 );
+            } else if let Some(icon) = self.vector_icon {
+                icon.paint(
+                    ui.painter(),
+                    egui::Rect::from_center_size(icon_center, vec2(15.0, 15.0)),
+                    icon_col,
+                );
             } else {
                 paint_sidebar_icon(ui.painter(), icon_center, self.icon, icon_col);
             }
@@ -356,6 +376,12 @@ impl SidebarItem<'_> {
                 Align2::CENTER_CENTER,
                 glyph,
                 FontId::proportional(14.0),
+                color,
+            );
+        } else if let Some(icon) = self.vector_icon {
+            icon.paint(
+                painter,
+                egui::Rect::from_center_size(icon_center, vec2(15.0, 15.0)),
                 color,
             );
         } else {
