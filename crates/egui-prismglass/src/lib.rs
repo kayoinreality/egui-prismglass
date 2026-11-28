@@ -62,6 +62,7 @@ pub mod blur;
 pub mod blur_glow;
 #[cfg(feature = "blur-wgpu")]
 pub mod blur_wgpu;
+pub mod icons;
 pub mod painter;
 mod prism;
 pub mod theme;
@@ -77,6 +78,7 @@ pub use blur::{
     BackdropBlurProvider, BackdropRequest, BlurCapability, FallbackBlurProvider, blur_provider,
     clear_blur_provider, effective_blur_capability, set_blur_provider,
 };
+pub use icons::{GlassIcon, Icon, paint_icon};
 pub use painter::{
     glass_bevel_and_shadow_shapes, glass_surface_shapes, glass_surface_shapes_with_ctx,
     paint_glass_surface, paint_glass_surface_ui, paint_prism_backdrop, paint_prism_backdrop_ui,
@@ -89,9 +91,11 @@ pub use tokens::{
 };
 pub use typography::{FontWeight, fonts_installed, install_fonts, prism_font, prism_numeric_font};
 pub use widgets::{
-    BadgeVariant, GlassBadge, GlassButton, GlassButtonVariant, GlassCard, GlassCheckbox,
-    GlassPanel, GlassProgress, GlassSegmented, GlassSidebar, GlassSlider, GlassToggle, SidebarIcon,
-    SidebarItem,
+    BadgeVariant, ButtonIcon, GlassBadge, GlassButton, GlassButtonVariant, GlassCard,
+    GlassCheckbox, GlassChip, GlassEmptyState, GlassKbd, GlassListRow, GlassMenu, GlassModal,
+    GlassModalResponse, GlassPanel, GlassPopover, GlassProgress, GlassSegmented, GlassSidebar,
+    GlassSlider, GlassTextField, GlassToasts, GlassToggle, MenuItem, SectionHeader, SidebarIcon,
+    SidebarItem, Toast, ToastAnchor, ToastId, ToastVariant, eyebrow_text,
 };
 
 /// Ergonomic extension methods on [`egui::Context`] for managing [`PrismTheme`] and GPU blur backends.
