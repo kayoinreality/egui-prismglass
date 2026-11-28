@@ -847,7 +847,7 @@ mod tests {
             paint_icon(painter, Rect::NOTHING, Icon::Plus, Color32::WHITE);
             ui.add(GlassIcon::new(Icon::Search).size(20.0));
         });
-        assert!(!out.shapes.is_empty());
+        assert!(out.shapes.len() > 1);
         out.textures_delta.clear();
     }
 

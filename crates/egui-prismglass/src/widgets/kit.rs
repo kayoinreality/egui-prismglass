@@ -239,7 +239,7 @@ impl Widget for GlassListRow {
         });
         let title_h = title.as_ref().map_or(0.0, |g| g.size().y);
         let sub_h = subtitle.as_ref().map_or(0.0, |g| g.size().y + 1.0);
-        let mut y = rect.center().y - (title_h + sub_h) * 0.5;
+        let mut y = rect.center().y - f32::midpoint(title_h, sub_h);
         let clip = painter.with_clip_rect(Rect::from_x_y_ranges(x..=right, rect.y_range()));
         if let Some(g) = title {
             let color = if strong {
