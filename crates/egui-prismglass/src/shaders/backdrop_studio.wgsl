@@ -15,7 +15,7 @@ struct BackdropUniforms {
     screen_size: vec2<f32>,      // physical pixels
     time_secs: f32,
     intensity: f32,
-    scene_id: u32,               // 0 = Studio Silk, 1 = Liquid Prism, 2 = Architectural Grid, 3 = Studio Neutral, 4 = None
+    scene_id: u32,               // 0 = Studio Silk, 1 = Liquid Prism, 2 = Architectural Grid, 3 = Studio Neutral, 4 = None, 5 = Aurora
     is_dark: u32,
     target_is_srgb: u32,
     _pad: u32,
@@ -238,6 +238,41 @@ fn render_studio_neutral(uv: vec2<f32>) -> vec3<f32> {
     return col;
 }
 
+// Scene 5: Aurora — soft multi-color light pools on a deep (or airy) base. The default wallpaper
+// of the Prism presets. Pools are blended in gamma space so the result matches CSS radial
+// gradients: violet (orb_primary), blue (orb_secondary), teal (orb_accent), pink (canvas_bottom).
+fn aurora_weight(uv: vec2<f32>, center: vec2<f32>, radius: vec2<f32>, edge: f32) -> f32 {
+    let d = length((uv - center) / radius);
+    let w = clamp(1.0 - d / edge, 0.0, 1.0);
+    return w * w * (3.0 - 2.0 * w);
+}
+
+fn to_gamma(c: vec3<f32>) -> vec3<f32> {
+    return pow(max(c, vec3<f32>(0.0)), vec3<f32>(1.0 / 2.2));
+}
+
+fn render_aurora(uv: vec2<f32>) -> vec3<f32> {
+    let t = u.time_secs * 0.06;
+    let k = clamp(u.intensity, 0.0, 1.5);
+    let dark = u.is_dark == 1u;
+    let a_violet = select(0.55, 0.60, dark) * k;
+    let a_blue = select(0.55, 0.60, dark) * k;
+    let a_teal = select(0.40, 0.50, dark) * k;
+    let a_pink = select(0.40, 0.45, dark) * k;
+
+    var col = to_gamma(u.canvas_top.rgb);
+    let w_pink = aurora_weight(uv, vec2<f32>(0.0 + 0.02 * sin(t * 1.3), 1.0), vec2<f32>(0.45, 0.55), 0.60);
+    col = mix(col, to_gamma(u.canvas_bottom.rgb), clamp(w_pink * a_pink, 0.0, 1.0));
+    let w_teal = aurora_weight(uv, vec2<f32>(0.80 + 0.03 * cos(t), 1.0), vec2<f32>(0.55, 0.60), 0.62);
+    col = mix(col, to_gamma(u.orb_accent.rgb), clamp(w_teal * a_teal, 0.0, 1.0));
+    let w_blue = aurora_weight(uv, vec2<f32>(0.90 - 0.02 * sin(t), 0.05 + 0.02 * cos(t * 0.8)), vec2<f32>(0.50, 0.60), 0.60);
+    col = mix(col, to_gamma(u.orb_secondary.rgb), clamp(w_blue * a_blue, 0.0, 1.0));
+    let w_violet = aurora_weight(uv, vec2<f32>(0.10 + 0.03 * sin(t * 0.9), 0.15), vec2<f32>(0.60, 0.70), 0.62);
+    col = mix(col, to_gamma(u.orb_primary.rgb), clamp(w_violet * a_violet, 0.0, 1.0));
+
+    return pow(max(col, vec3<f32>(0.0)), vec3<f32>(2.2));
+}
+
 @fragment
 fn fs_generate(in: VsOut) -> @location(0) vec4<f32> {
     var rgb: vec3<f32>;
@@ -245,6 +280,8 @@ fn fs_generate(in: VsOut) -> @location(0) vec4<f32> {
         rgb = render_liquid_prism(in.uv);
     } else if u.scene_id == 2u {
         rgb = render_architectural_grid(in.uv);
+    } else if u.scene_id == 5u {
+        rgb = render_aurora(in.uv);
     } else if u.scene_id == 3u || u.scene_id == 4u {
         rgb = render_studio_neutral(in.uv);
     } else {

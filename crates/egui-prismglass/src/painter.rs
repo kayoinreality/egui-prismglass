@@ -34,6 +34,38 @@ pub fn paint_glass_surface(painter: &Painter, rect: Rect, tokens: &GlassSurfaceT
     }
 }
 
+/// Paints a surface into a fixed `rect` of `ui`, using real GPU backdrop blur when a provider
+/// is installed and the tokens describe glass, and the pure-`egui` renderer otherwise.
+///
+/// This is what [`crate::GlassCard`] and [`crate::GlassPanel`] do internally; use it for custom
+/// layouts (docked app regions, table rows, overlays) where a container widget does not fit.
+/// Paint the surface **before** adding the widgets that sit on top of it. Set
+/// `translucent_overlay` for floating layers drawn over live content (toolbars over a table,
+/// popovers over a viewport) so that content shows through instead of the backdrop.
+pub fn paint_glass_surface_ui(
+    ui: &Ui,
+    rect: Rect,
+    tokens: &GlassSurfaceTokens,
+    translucent_overlay: bool,
+) {
+    let theme = PrismTheme::from_ctx(ui.ctx());
+    let id = ui.make_persistent_id((
+        "prism_custom_surface",
+        rect.min.x as i32,
+        rect.min.y as i32,
+        rect.width() as i32,
+    ));
+    let shapes = crate::blur::resolve_glass_surface_shapes_with_overlay(
+        ui,
+        id,
+        rect,
+        tokens,
+        &theme,
+        translucent_overlay,
+    );
+    ui.painter().extend(shapes);
+}
+
 /// Builds the complete list of [`egui::Shape`]s for a 3D-beveled glass or solid minimal surface.
 pub fn glass_surface_shapes(rect: Rect, tokens: &GlassSurfaceTokens) -> Vec<Shape> {
     build_surface_shapes(rect, tokens, None, false)
@@ -333,6 +365,11 @@ pub fn paint_prism_backdrop(
         return;
     }
 
+    if theme.backdrop_scene == BackdropScene::Aurora {
+        paint_aurora_fallback(painter, rect, theme, time_secs, orb_intensity);
+        return;
+    }
+
     let mid = blend_colors(theme.palette.canvas, theme.palette.canvas_secondary, 0.5);
     let bg_mesh = rounded_rect_gradient_mesh(
         rect,
@@ -509,7 +546,61 @@ pub fn paint_prism_backdrop(
         (_, BackdropScene::ArchitecturalGrid) => {
             paint_architectural_grid_fallback(painter, rect, theme, intensity);
         }
-        (_, BackdropScene::StudioNeutral | BackdropScene::None) => {}
+        (_, BackdropScene::StudioNeutral | BackdropScene::Aurora | BackdropScene::None) => {}
+    }
+}
+
+/// CPU approximation of the GPU Aurora wallpaper: four soft light pools over a flat base.
+fn paint_aurora_fallback(
+    painter: &Painter,
+    rect: Rect,
+    theme: &PrismTheme,
+    time_secs: f32,
+    orb_intensity: f32,
+) {
+    painter.rect_filled(rect, CornerRadius::ZERO, theme.palette.canvas);
+    let k = orb_intensity.clamp(0.0, 1.5);
+    if k <= 0.01 {
+        return;
+    }
+    let dark = theme.mode == ThemeMode::Dark;
+    let t = time_secs * 0.06;
+    let (w, h) = (rect.width(), rect.height());
+    let at = |x: f32, y: f32| pos2(rect.min.x + w * x, rect.min.y + h * y);
+    let pools = [
+        (
+            at(0.0 + 0.02 * (t * 1.3).sin(), 1.0),
+            0.60 * (0.45 * w).max(0.55 * h),
+            theme.palette.canvas_secondary,
+            if dark { 0.45 } else { 0.40 },
+        ),
+        (
+            at(0.80 + 0.03 * t.cos(), 1.0),
+            0.62 * (0.55 * w).max(0.60 * h),
+            theme.palette.orb_accent,
+            if dark { 0.50 } else { 0.40 },
+        ),
+        (
+            at(0.90 - 0.02 * t.sin(), 0.05),
+            0.60 * (0.50 * w).max(0.60 * h),
+            theme.palette.orb_secondary,
+            if dark { 0.60 } else { 0.55 },
+        ),
+        (
+            at(0.10 + 0.03 * (t * 0.9).sin(), 0.15),
+            0.62 * (0.60 * w).max(0.70 * h),
+            theme.palette.orb_primary,
+            if dark { 0.60 } else { 0.55 },
+        ),
+    ];
+    for (center, radius, color, alpha) in pools {
+        // The orb falloff is steeper than the GPU pools, so lift its peak a little.
+        paint_radial_glow_orb(
+            painter,
+            center,
+            radius * 1.25,
+            scale_alpha(color, alpha * 1.3 * k),
+        );
     }
 }
 

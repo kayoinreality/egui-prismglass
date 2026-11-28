@@ -1,10 +1,10 @@
-//! Native launcher for the `egui-prismglass` showcase demo (`cargo run -p demo`).
+//! Native launcher for the `egui-prismglass` Prism Studio demo (`cargo run -p demo`).
 
-use demo::DemoApp;
+use demo::StudioApp;
 use eframe::egui;
 
 struct EframeDemo {
-    app: DemoApp,
+    app: StudioApp,
     #[cfg(feature = "blur-glow")]
     glow_blur: Option<std::sync::Arc<egui_prismglass::blur_glow::GlowBlurProvider>>,
 }
@@ -29,7 +29,7 @@ impl eframe::App for EframeDemo {
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_title("egui-prismglass v0.2 — Real GPU Liquid Glass Showcase")
+            .with_title("Prism Studio — egui-prismglass")
             .with_inner_size([1280.0, 810.0])
             .with_min_inner_size([920.0, 640.0]),
         ..Default::default()
@@ -50,9 +50,9 @@ fn main() -> eframe::Result {
                 .as_ref()
                 .and_then(|gl| egui_prismglass::blur_glow::install(&cc.egui_ctx, gl).ok());
 
-            let _ = cc;
+            egui_prismglass::install_fonts(&cc.egui_ctx);
             Ok(Box::new(EframeDemo {
-                app: DemoApp::default(),
+                app: StudioApp::default(),
                 #[cfg(feature = "blur-glow")]
                 glow_blur,
             }))

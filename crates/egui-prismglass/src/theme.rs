@@ -6,12 +6,20 @@
 //! - [`SurfaceStyle::Glass`]: 3D Apple Liquid Glass (real GPU Dual-Kawase blur when enabled,
 //!   or refined pure-`egui` fallback with zero GPU dependencies).
 //! - [`SurfaceStyle::Minimal`]: Solid, ultra-clean flat surfaces (Linear / Vercel / Reduced Transparency).
+//!
+//! The **Prism** presets ([`PrismTheme::prism_dark`], [`PrismTheme::prism_light`],
+//! [`PrismTheme::prism_glass_dark`], [`PrismTheme::prism_glass_light`]) use a calmer design
+//! language — Inter typography, a 12-step neutral ramp, one accent, hairline borders and no
+//! bevels — in two materials:
+//! - [`SurfaceStyle::Layered`]: solid, flat content with glass reserved for floating layers
+//!   (sidebars, popovers, menus, floating toolbars).
+//! - [`SurfaceStyle::Frosted`]: the same language with every container made of frosted glass.
 
 use egui::{Color32, Context, CornerRadius, Id, Shadow, Stroke, Visuals};
 
 use crate::tokens::{
-    AccentPalette, BackdropScene, GlassElevation, GlassSurfaceTokens, PrismPalette, RadiusTokens,
-    SpacingTokens,
+    AccentPalette, BackdropScene, GlassElevation, GlassSurfaceTokens, PrismNeutrals, PrismPalette,
+    RadiusTokens, SpacingTokens,
 };
 
 const THEME_STORAGE_ID: &str = "egui_prismglass_active_theme";
@@ -36,16 +44,53 @@ pub enum SurfaceStyle {
     Glass,
     /// Solid, opaque minimalist surfaces over a clean flat canvas (also ideal for Reduced Transparency).
     Minimal,
+    /// Prism design language: solid, flat content surfaces, with frosted glass used only for
+    /// floating layers (sidebars, popovers, menus and floating toolbars).
+    Layered,
+    /// Prism design language with every container (panels, cards, sidebars, popovers) made of
+    /// frosted glass over the backdrop.
+    Frosted,
+}
+
+impl SurfaceStyle {
+    /// Returns `true` for the Prism design language ([`Self::Layered`] and [`Self::Frosted`]).
+    pub fn is_prism(self) -> bool {
+        matches!(self, Self::Layered | Self::Frosted)
+    }
+
+    /// Returns `true` when the style paints a backdrop scene and may use real GPU blur
+    /// (every style except [`Self::Minimal`]).
+    pub fn uses_backdrop(self) -> bool {
+        !matches!(self, Self::Minimal)
+    }
+
+    /// Human-readable label for UI pickers.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Glass => "Liquid Glass",
+            Self::Minimal => "Neumorphic",
+            Self::Layered => "Layered",
+            Self::Frosted => "All glass",
+        }
+    }
 }
 
 /// Built-in visual presets shipped with `egui-prismglass`.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Default)]
 #[cfg_attr(feature = "serde", derive(serde::Serialize, serde::Deserialize))]
 pub enum PrismPreset {
+    /// **Prism Dark**: solid content, glass only on floating layers (the default).
+    #[default]
+    PrismDark,
+    /// **Prism Light**: solid content, glass only on floating layers.
+    PrismLight,
+    /// **Prism Glass Dark**: the Prism language with every container made of frosted glass.
+    PrismGlassDark,
+    /// **Prism Glass Light**: the Prism language with every container made of frosted glass.
+    PrismGlassLight,
     /// Antigravity **Frost** light glass (`#F8F9FC`) with crystalline translucent white panes and `#3279F9` accents.
     Frost,
     /// **Onyx** dark 3D smoked-crystal glass (`#090A0D`) with sculpted titanium lighting and `#3279F9` accents.
-    #[default]
     Onyx,
     /// High-clarity **Glacial** 3D crystal glass with stronger refraction and platinum-ice depth.
     Glacial,
@@ -56,9 +101,30 @@ pub enum PrismPreset {
 }
 
 impl PrismPreset {
+    /// The four Prism presets (two polarities × two materials).
+    pub const PRISM: [Self; 4] = [
+        Self::PrismDark,
+        Self::PrismLight,
+        Self::PrismGlassDark,
+        Self::PrismGlassLight,
+    ];
+
+    /// The classic v0.2 presets (3D Liquid Glass and Neumorphic), kept unchanged.
+    pub const CLASSIC: [Self; 5] = [
+        Self::Frost,
+        Self::Onyx,
+        Self::Glacial,
+        Self::MinimalLight,
+        Self::MinimalDark,
+    ];
+
     /// Human-readable display label for UI selectors.
     pub fn label(self) -> &'static str {
         match self {
+            Self::PrismDark => "Prism Dark",
+            Self::PrismLight => "Prism Light",
+            Self::PrismGlassDark => "Prism Glass Dark",
+            Self::PrismGlassLight => "Prism Glass Light",
             Self::Frost => "Frost Light",
             Self::Onyx => "Onyx Dark",
             Self::Glacial => "Glacial Glass",
@@ -70,6 +136,8 @@ impl PrismPreset {
     /// Returns whether this preset uses translucent glass or solid minimal surfaces.
     pub fn surface_style(self) -> SurfaceStyle {
         match self {
+            Self::PrismDark | Self::PrismLight => SurfaceStyle::Layered,
+            Self::PrismGlassDark | Self::PrismGlassLight => SurfaceStyle::Frosted,
             Self::Frost | Self::Onyx | Self::Glacial => SurfaceStyle::Glass,
             Self::MinimalLight | Self::MinimalDark => SurfaceStyle::Minimal,
         }
@@ -78,6 +146,10 @@ impl PrismPreset {
     /// Instantiates the corresponding [`PrismTheme`].
     pub fn into_theme(self) -> PrismTheme {
         match self {
+            Self::PrismDark => PrismTheme::prism_dark(),
+            Self::PrismLight => PrismTheme::prism_light(),
+            Self::PrismGlassDark => PrismTheme::prism_glass_dark(),
+            Self::PrismGlassLight => PrismTheme::prism_glass_light(),
             Self::Frost => PrismTheme::frost(),
             Self::Onyx => PrismTheme::onyx(),
             Self::Glacial => PrismTheme::glacial(),
@@ -103,6 +175,8 @@ pub struct PrismTheme {
     pub accent_palette: AccentPalette,
     /// Semantic colors and subtle backdrop luminance tones.
     pub palette: PrismPalette,
+    /// Neutral interface colors for controls, tracks, rows and hairlines.
+    pub neutrals: PrismNeutrals,
     /// Spacing scale.
     pub spacing: SpacingTokens,
     /// Corner radius scale.
@@ -141,7 +215,7 @@ pub struct PrismTheme {
 
 impl Default for PrismTheme {
     fn default() -> Self {
-        Self::onyx()
+        Self::prism_dark()
     }
 }
 
@@ -310,6 +384,7 @@ impl PrismTheme {
             surface_style: SurfaceStyle::Glass,
             backdrop_scene: BackdropScene::SculptedWaves,
             accent_palette: AccentPalette::Cobalt,
+            neutrals: PrismNeutrals::derived(true, &palette),
             palette,
             spacing: SpacingTokens::default(),
             radius,
@@ -488,6 +563,7 @@ impl PrismTheme {
             surface_style: SurfaceStyle::Glass,
             backdrop_scene: BackdropScene::SculptedWaves,
             accent_palette: AccentPalette::Cobalt,
+            neutrals: PrismNeutrals::derived(false, &palette),
             palette,
             spacing: SpacingTokens::default(),
             radius,
@@ -586,6 +662,7 @@ impl PrismTheme {
         theme.surface_panel.grain_intensity = 0.008;
         theme.surface_panel.blur_tint_alpha = 0.36;
 
+        theme.neutrals = PrismNeutrals::derived(true, &theme.palette);
         theme
     }
 
@@ -711,6 +788,7 @@ impl PrismTheme {
         );
 
         theme.set_accent_palette(AccentPalette::Cobalt);
+        theme.neutrals = PrismNeutrals::derived(false, &theme.palette);
         theme
     }
 
@@ -836,6 +914,7 @@ impl PrismTheme {
         );
 
         theme.set_accent_palette(AccentPalette::Cobalt);
+        theme.neutrals = PrismNeutrals::derived(true, &theme.palette);
         theme
     }
 
@@ -859,7 +938,11 @@ impl PrismTheme {
     pub fn set_accent_palette(&mut self, accent: AccentPalette) {
         self.accent_palette = accent;
         let is_dark = self.mode == ThemeMode::Dark;
-        let primary = accent.primary(is_dark);
+        let primary = if self.surface_style.is_prism() {
+            accent.prism(is_dark)
+        } else {
+            accent.primary(is_dark)
+        };
         let companion = accent.companion(is_dark);
 
         self.palette.accent = primary;
@@ -924,7 +1007,14 @@ impl PrismTheme {
                 )
                 .with_vibrancy(tokens.vibrancy * self.vibrancy_scale.clamp(0.5, 1.8))
                 .with_grain(tokens.grain_intensity * self.grain_scale.clamp(0.0, 3.0)),
-            SurfaceStyle::Minimal => scaled,
+            // Prism styles: optical multipliers only affect real glass materials; solid content
+            // surfaces stay opaque whatever the glass dials say.
+            SurfaceStyle::Layered | SurfaceStyle::Frosted if tokens.blur_radius > 0.0 => scaled
+                .with_opacity_scale(self.glass_opacity_scale)
+                .with_blur_radius(tokens.blur_radius * self.blur_radius_scale.clamp(0.0, 2.5))
+                .with_vibrancy(tokens.vibrancy * self.vibrancy_scale.clamp(0.5, 1.8))
+                .with_grain(tokens.grain_intensity * self.grain_scale.clamp(0.0, 3.0)),
+            SurfaceStyle::Minimal | SurfaceStyle::Layered | SurfaceStyle::Frosted => scaled,
         }
     }
 
@@ -933,6 +1023,24 @@ impl PrismTheme {
     /// Configures `egui`'s [`Visuals`] and spacing to harmonize with `PrismGlass` surfaces
     /// and stores a copy of this theme in context memory for all widgets to read.
     pub fn apply(&self, ctx: &Context) {
+        let previous_was_prism = ctx
+            .data(|data| data.get_temp::<Self>(Id::NULL.with(THEME_STORAGE_ID)))
+            .is_some_and(|prev| prev.surface_style.is_prism());
+
+        if self.surface_style.is_prism() {
+            self.apply_prism_style(ctx);
+            ctx.data_mut(|data| {
+                data.insert_temp(Id::NULL.with(THEME_STORAGE_ID), self.clone());
+            });
+            return;
+        }
+        if previous_was_prism {
+            // Undo the Prism type scale when switching back to a classic preset.
+            ctx.all_styles_mut(|style| {
+                style.text_styles = egui::Style::default().text_styles;
+            });
+        }
+
         let mut visuals = match self.mode {
             ThemeMode::Dark => Visuals::dark(),
             ThemeMode::Light => Visuals::light(),
@@ -1002,7 +1110,7 @@ impl PrismTheme {
     }
 
     /// Reads the currently active [`PrismTheme`] from [`egui::Context`], falling back to
-    /// [`PrismTheme::onyx()`] if [`PrismTheme::apply`] has not been called yet.
+    /// [`PrismTheme::prism_dark()`] if [`PrismTheme::apply`] has not been called yet.
     pub fn from_ctx(ctx: &Context) -> Self {
         ctx.data(|data| data.get_temp::<Self>(Id::NULL.with(THEME_STORAGE_ID)))
             .unwrap_or_default()

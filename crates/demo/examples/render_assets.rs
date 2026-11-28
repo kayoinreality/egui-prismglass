@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::Path;
 
-use demo::{DemoApp, DemoTab};
+use demo::{DemoApp, DemoTab, StudioApp};
 use egui::{Align2, Area, Color32, FontId, Id, Margin, RichText, pos2, vec2};
 use egui_kittest::Harness;
 use egui_prismglass::{
@@ -639,9 +639,95 @@ fn capture_neumorphic_palettes(assets_dir: &Path) {
     );
 }
 
+/// Renders the Prism Studio demo (the flagship of the Prism presets) at 1280×810 @1.5x.
+fn capture_studio(preset: PrismPreset, accent: AccentPalette, filename: &str, assets_dir: &Path) {
+    capture_studio_with(preset, accent, true, filename, assets_dir);
+}
+
+fn capture_studio_with(
+    preset: PrismPreset,
+    accent: AccentPalette,
+    real_blur: bool,
+    filename: &str,
+    assets_dir: &Path,
+) {
+    let mut app = StudioApp::with_preset(preset);
+    app.set_accent(accent);
+    app.theme.real_blur_enabled = real_blur;
+
+    let mut installed = false;
+    let mut harness = Harness::builder()
+        .with_size(vec2(1280.0, 810.0))
+        .with_pixels_per_point(1.5)
+        .build_ui(move |ui| {
+            #[cfg(feature = "blur-wgpu")]
+            if !installed {
+                egui_prismglass::blur_wgpu::install_with_format(
+                    ui.ctx(),
+                    egui_prismglass::blur_wgpu::wgpu::TextureFormat::Rgba8Unorm,
+                );
+                installed = true;
+            }
+            let _ = installed;
+            // Use the whole viewport (the harness root `Ui` has a small margin).
+            let full = ui.ctx().content_rect();
+            ui.scope_builder(egui::UiBuilder::new().max_rect(full), |ui| {
+                ui.set_clip_rect(full);
+                app.show(ui);
+            });
+        });
+    harness.step();
+    harness.step();
+    harness.step();
+
+    let path = assets_dir.join(filename);
+    let image = harness
+        .render()
+        .expect("headless wgpu renderer should produce RGBA image");
+    image
+        .save(&path)
+        .expect("failed to write rendered showcase screenshot");
+    println!("Saved {}", path.display());
+}
+
 fn main() {
     let assets_dir = Path::new("assets");
     fs::create_dir_all(assets_dir).expect("failed to create assets directory");
+
+    capture_studio(
+        PrismPreset::PrismDark,
+        AccentPalette::Cobalt,
+        "prism-dark.png",
+        assets_dir,
+    );
+    capture_studio(
+        PrismPreset::PrismLight,
+        AccentPalette::Cobalt,
+        "prism-light.png",
+        assets_dir,
+    );
+    capture_studio(
+        PrismPreset::PrismGlassDark,
+        AccentPalette::Violet,
+        "prism-glass-dark.png",
+        assets_dir,
+    );
+    capture_studio(
+        PrismPreset::PrismGlassLight,
+        AccentPalette::Emerald,
+        "prism-glass-light.png",
+        assets_dir,
+    );
+    capture_studio_with(
+        PrismPreset::PrismGlassDark,
+        AccentPalette::Violet,
+        false,
+        "prism-glass-dark-fallback.png",
+        assets_dir,
+    );
+    if std::env::args().nth(1).as_deref() == Some("prism") {
+        return;
+    }
 
     capture_liquid_glass_studio(assets_dir);
     capture_neumorphic_palettes(assets_dir);

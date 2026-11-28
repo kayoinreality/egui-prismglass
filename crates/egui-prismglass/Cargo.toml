@@ -1,6 +1,6 @@
 [package]
 name = "egui-prismglass"
-description = "A fallback-first 3D glassmorphic & minimal design system for egui with opt-in real GPU backdrop blur (WGSL Dual-Kawase + Apple Liquid Glass optics for wgpu, live grab-pass for glow)."
+description = "A modern design system and widget kit for egui: Inter typography, neutral tokens, Layered and all-glass materials, with opt-in real GPU backdrop blur (WGSL Dual-Kawase for wgpu, live grab-pass for glow)."
 readme = "../../README.md"
 version.workspace = true
 edition.workspace = true
@@ -12,7 +12,10 @@ keywords.workspace = true
 categories.workspace = true
 
 [features]
-default = []
+default = ["inter"]
+## Bundles the Inter typeface (SIL OFL 1.1, ~0.9 MB) used by the Prism presets. Install it with
+## `egui_prismglass::install_fonts(ctx)`; without this feature widgets fall back to egui's fonts.
+inter = []
 ## Enables `serde::Serialize` and `serde::Deserialize` on design tokens and themes.
 serde = ["dep:serde", "egui/serde"]
 ## Enables real GPU Dual-Kawase backdrop blur + Apple Liquid Glass WGSL optics on `wgpu 30` (`eframe+wgpu` & own-loop `egui-wgpu`).

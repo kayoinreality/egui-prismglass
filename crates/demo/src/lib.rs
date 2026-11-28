@@ -6,6 +6,9 @@
 
 #![allow(missing_docs)]
 
+pub mod studio;
+pub use studio::StudioApp;
+
 use egui::{
     Align, Color32, CornerRadius, FontId, Frame, Layout, Margin, RichText, ScrollArea, Sense,
     Stroke, StrokeKind, TextEdit, Ui, pos2, vec2,
@@ -310,7 +313,7 @@ impl DemoApp {
                             BadgeVariant::Accent,
                             "Sculpted tactile solid surfaces with dual soft shadows & vibrant accents.",
                         ),
-                        (SurfaceStyle::Glass, BlurCapability::RealBackdrop { backend }) => (
+                        (_, BlurCapability::RealBackdrop { backend }) => (
                             if backend.contains("glow") {
                                 "GPU Grab-Pass"
                             } else {
@@ -319,7 +322,7 @@ impl DemoApp {
                             BadgeVariant::Success,
                             "Real WGSL Dual-Kawase pyramid + Liquid Glass bevel refraction & vibrancy.",
                         ),
-                        (SurfaceStyle::Glass, BlurCapability::FallbackOnly) => (
+                        (_, BlurCapability::FallbackOnly) => (
                             "Fallback Glass",
                             BadgeVariant::Warm,
                             "Pure-egui translucent glass with cached frost grain & dual 3D shadows.",
@@ -380,18 +383,14 @@ impl DemoApp {
 
                     let (toggle_label, next_preset) =
                         match (self.theme.surface_style, self.theme.mode) {
-                            (SurfaceStyle::Glass, ThemeMode::Light) => {
-                                ("Onyx Dark", PrismPreset::Onyx)
-                            }
-                            (SurfaceStyle::Glass, ThemeMode::Dark) => {
-                                ("Frost Light", PrismPreset::Frost)
-                            }
                             (SurfaceStyle::Minimal, ThemeMode::Light) => {
                                 ("Minimal Dark", PrismPreset::MinimalDark)
                             }
                             (SurfaceStyle::Minimal, ThemeMode::Dark) => {
                                 ("Minimal Light", PrismPreset::MinimalLight)
                             }
+                            (_, ThemeMode::Light) => ("Onyx Dark", PrismPreset::Onyx),
+                            (_, ThemeMode::Dark) => ("Frost Light", PrismPreset::Frost),
                         };
                     if ui
                         .add(GlassButton::secondary(toggle_label).pill(true))
@@ -415,7 +414,7 @@ impl DemoApp {
         let cap = ui.ctx().prism_blur_capability();
         let (engine_val, engine_tag, engine_variant) = match (self.theme.surface_style, cap) {
             (SurfaceStyle::Minimal, _) => ("Minimal", "Opaque", BadgeVariant::Neutral),
-            (SurfaceStyle::Glass, BlurCapability::RealBackdrop { backend }) => (
+            (_, BlurCapability::RealBackdrop { backend }) => (
                 if backend.contains("glow") {
                     "Glow GL"
                 } else {
@@ -424,9 +423,7 @@ impl DemoApp {
                 "Real Blur",
                 BadgeVariant::Success,
             ),
-            (SurfaceStyle::Glass, BlurCapability::FallbackOnly) => {
-                ("Fallback", "Pure egui", BadgeVariant::Warm)
-            }
+            (_, BlurCapability::FallbackOnly) => ("Fallback", "Pure egui", BadgeVariant::Warm),
         };
 
         let blur_pts = self.theme.surface(GlassElevation::Elevated).blur_radius;

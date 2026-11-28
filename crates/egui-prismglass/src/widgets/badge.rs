@@ -22,6 +22,8 @@ pub enum BadgeVariant {
     Success,
     /// Semantic warning chip.
     Warning,
+    /// Semantic danger / error chip.
+    Danger,
 }
 
 /// A compact translucent pill badge with optional glowing status indicator dot.
@@ -63,6 +65,9 @@ impl<'a> GlassBadge<'a> {
 impl Widget for GlassBadge<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let theme = PrismTheme::from_ctx(ui.ctx());
+        if theme.surface_style.is_prism() {
+            return self.prism_ui(ui, &theme);
+        }
         let font = FontId::proportional(11.5);
         let galley = ui.painter().layout_no_wrap(
             self.text.to_owned(),
@@ -83,6 +88,7 @@ impl Widget for GlassBadge<'_> {
                 BadgeVariant::Warm => (theme.palette.accent_warm, theme.palette.accent_warm),
                 BadgeVariant::Success => (theme.palette.success, theme.palette.success),
                 BadgeVariant::Warning => (theme.palette.warning, theme.palette.warning),
+                BadgeVariant::Danger => (theme.palette.danger, theme.palette.danger),
             };
 
             let (fill_alpha, border_alpha) = match (self.variant, theme.mode) {
@@ -137,6 +143,57 @@ impl Widget for GlassBadge<'_> {
             );
         }
 
+        response
+    }
+}
+
+impl GlassBadge<'_> {
+    /// Prism-style status pill: neutral body, hairline, color only in the status dot.
+    ///
+    /// Non-neutral variants always show their dot, since it is the only place color appears.
+    fn prism_ui(self, ui: &mut Ui, theme: &PrismTheme) -> Response {
+        use super::prism_paint::{control_colors, fill};
+        use crate::typography::{FontWeight, prism_font};
+
+        let font = prism_font(ui.ctx(), 12.0, FontWeight::Medium);
+        let galley =
+            ui.painter()
+                .layout_no_wrap(self.text.to_owned(), font, theme.palette.text_secondary);
+        let dot_color = match self.variant {
+            BadgeVariant::Neutral => theme.neutrals.muted,
+            BadgeVariant::Accent => theme.palette.accent,
+            BadgeVariant::Warm => theme.palette.accent_warm,
+            BadgeVariant::Success => theme.palette.success,
+            BadgeVariant::Warning => theme.palette.warning,
+            BadgeVariant::Danger => theme.palette.danger,
+        };
+        let show_dot = self.dot || self.variant != BadgeVariant::Neutral;
+        let dot_space = if show_dot { 12.0 } else { 0.0 };
+        let (rect, response) = ui.allocate_exact_size(
+            vec2(galley.size().x + 16.0 + dot_space, 22.0),
+            Sense::hover(),
+        );
+        if ui.is_rect_visible(rect) {
+            let painter = ui.painter();
+            let (bg, _) = control_colors(theme);
+            fill(
+                painter,
+                rect,
+                rect.height() * 0.5,
+                bg,
+                theme.neutrals.border,
+            );
+            let mut x = rect.min.x + 8.0;
+            if show_dot {
+                painter.circle_filled(pos2(x + 3.0, rect.center().y), 3.0, dot_color);
+                x += dot_space;
+            }
+            painter.galley(
+                pos2(x, rect.center().y - galley.size().y * 0.5),
+                galley,
+                theme.palette.text_secondary,
+            );
+        }
         response
     }
 }

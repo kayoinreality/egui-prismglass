@@ -35,6 +35,9 @@ impl<'a> GlassToggle<'a> {
 impl Widget for GlassToggle<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let theme = PrismTheme::from_ctx(ui.ctx());
+        if theme.surface_style.is_prism() {
+            return self.prism_ui(ui, &theme);
+        }
         let switch_w: f32 = 40.0;
         let switch_h: f32 = 22.0;
 
@@ -116,6 +119,71 @@ impl Widget for GlassToggle<'_> {
             }
         }
 
+        response
+    }
+}
+
+impl GlassToggle<'_> {
+    /// Prism-style switch: 36×20 track, flat accent when on, white knob with a contact shadow.
+    fn prism_ui(self, ui: &mut Ui, theme: &PrismTheme) -> Response {
+        use super::prism_paint::{fill, knob, track_color};
+        use crate::typography::{FontWeight, prism_font};
+
+        let (switch_w, switch_h) = (36.0_f32, 20.0_f32);
+        let font = prism_font(ui.ctx(), 13.0, FontWeight::Regular);
+        let label_galley = self.label.as_ref().map(|text| {
+            ui.painter()
+                .layout_no_wrap(text.clone(), font.clone(), theme.palette.text_primary)
+        });
+        let total_w = label_galley
+            .as_ref()
+            .map_or(switch_w, |g| switch_w + 10.0 + g.size().x);
+        let (outer_rect, mut response) =
+            ui.allocate_exact_size(vec2(total_w, 24.0), Sense::click());
+        if response.hovered() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::PointingHand);
+        }
+        if response.clicked() {
+            *self.on = !*self.on;
+            response.mark_changed();
+        }
+        response.widget_info(|| {
+            egui::WidgetInfo::selected(
+                egui::Role::Switch,
+                ui.is_enabled(),
+                *self.on,
+                self.label.clone().unwrap_or_default(),
+            )
+        });
+        let anim = ui.ctx().animate_bool_responsive(response.id, *self.on);
+
+        if ui.is_rect_visible(outer_rect) {
+            let painter = ui.painter();
+            let switch_rect = egui::Rect::from_center_size(
+                pos2(outer_rect.min.x + switch_w * 0.5, outer_rect.center().y),
+                vec2(switch_w, switch_h),
+            );
+            let off = track_color(theme);
+            let bg = blend_colors(off, theme.palette.accent, anim);
+            let border = scale_alpha(theme.neutrals.border_strong, 1.0 - anim);
+            fill(painter, switch_rect, switch_h * 0.5, bg, border);
+
+            let knob_r = 8.0;
+            let x_off = switch_rect.min.x + 2.0 + knob_r;
+            let x_on = switch_rect.max.x - 2.0 - knob_r;
+            knob(
+                painter,
+                pos2(x_off + (x_on - x_off) * anim, switch_rect.center().y),
+                knob_r,
+            );
+            if let Some(galley) = label_galley {
+                let pos = pos2(
+                    switch_rect.max.x + 10.0,
+                    outer_rect.center().y - galley.size().y * 0.5,
+                );
+                painter.galley(pos, galley, theme.palette.text_primary);
+            }
+        }
         response
     }
 }

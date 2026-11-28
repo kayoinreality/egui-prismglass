@@ -66,6 +66,9 @@ impl<'a> GlassSlider<'a> {
 impl Widget for GlassSlider<'_> {
     fn ui(self, ui: &mut Ui) -> Response {
         let theme = PrismTheme::from_ctx(ui.ctx());
+        if theme.surface_style.is_prism() {
+            return self.prism_ui(ui, &theme);
+        }
         let accent = self.accent.unwrap_or(theme.palette.accent);
         let min = *self.range.start();
         let max = *self.range.end();
@@ -171,6 +174,93 @@ impl Widget for GlassSlider<'_> {
                 .circle_stroke(thumb_center, thumb_r, Stroke::new(1.0, thumb_border));
         }
 
+        response
+    }
+}
+
+impl GlassSlider<'_> {
+    /// Prism-style slider: 4pt recessed rail, accent fill, white knob, Inter readout.
+    fn prism_ui(self, ui: &mut Ui, theme: &PrismTheme) -> Response {
+        use super::prism_paint::{knob, track_color};
+        use crate::typography::{FontWeight, prism_font, prism_numeric_font};
+
+        let accent = self.accent.unwrap_or(theme.palette.accent);
+        let min = *self.range.start();
+        let max = *self.range.end();
+        let span = (max - min).max(f32::EPSILON);
+        let header_h = if self.label.is_some() { 22.0 } else { 0.0 };
+        let width = ui.available_width().max(120.0);
+        let (outer_rect, mut response) =
+            ui.allocate_exact_size(vec2(width, header_h + 20.0), Sense::click_and_drag());
+        let track_rect = egui::Rect::from_min_max(
+            pos2(outer_rect.min.x, outer_rect.min.y + header_h),
+            outer_rect.max,
+        );
+        let thumb_r = 8.0;
+        let rail_min_x = track_rect.min.x + thumb_r;
+        let rail_max_x = (track_rect.max.x - thumb_r).max(rail_min_x + 1.0);
+
+        if response.hovered() || response.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::Grab);
+        }
+        if (response.dragged() || response.clicked())
+            && let Some(pointer) = response.interact_pointer_pos()
+        {
+            let norm = ((pointer.x - rail_min_x) / (rail_max_x - rail_min_x)).clamp(0.0, 1.0);
+            let next = min + norm * span;
+            if (*self.value - next).abs() > f32::EPSILON {
+                *self.value = next;
+                response.mark_changed();
+            }
+        }
+        let value = *self.value;
+        response.widget_info(|| {
+            egui::WidgetInfo::slider(
+                ui.is_enabled(),
+                f64::from(value),
+                self.label.clone().unwrap_or_default(),
+            )
+        });
+        let norm = ((value - min) / span).clamp(0.0, 1.0);
+
+        if ui.is_rect_visible(outer_rect) {
+            let painter = ui.painter();
+            if let Some(label) = &self.label {
+                let y = outer_rect.min.y + 8.0;
+                painter.text(
+                    pos2(outer_rect.min.x, y),
+                    Align2::LEFT_CENTER,
+                    label,
+                    prism_font(ui.ctx(), 12.0, FontWeight::Medium),
+                    theme.palette.text_secondary,
+                );
+                let formatted = match &self.suffix {
+                    Some(suf) => format!("{value:.prec$}{suf}", prec = self.decimals),
+                    None => format!("{value:.prec$}", prec = self.decimals),
+                };
+                painter.text(
+                    pos2(outer_rect.max.x, y),
+                    Align2::RIGHT_CENTER,
+                    formatted,
+                    prism_numeric_font(ui.ctx(), 12.0, FontWeight::Medium),
+                    theme.palette.text_primary,
+                );
+            }
+            let cy = track_rect.center().y;
+            let rail =
+                egui::Rect::from_min_max(pos2(rail_min_x, cy - 2.0), pos2(rail_max_x, cy + 2.0));
+            painter.rect_filled(rail, CornerRadius::same(2), track_color(theme));
+            let thumb_x = rail_min_x + (rail_max_x - rail_min_x) * norm;
+            let filled = egui::Rect::from_min_max(rail.min, pos2(thumb_x, rail.max.y));
+            if filled.width() > 0.5 {
+                painter.rect_filled(filled, CornerRadius::same(2), accent);
+            }
+            let center = pos2(thumb_x, cy);
+            if response.hovered() || response.dragged() {
+                painter.circle_filled(center, thumb_r + 4.0, scale_alpha(accent, 0.18));
+            }
+            knob(painter, center, thumb_r);
+        }
         response
     }
 }

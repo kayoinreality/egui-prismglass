@@ -1,21 +1,27 @@
 //! # egui-prismglass
 //!
-//! A fallback-first 3D glassmorphic & minimal design system and widget kit for [`egui`] with
-//! opt-in **real GPU backdrop blur** and **Apple Liquid Glass optics**.
+//! A modern design system and widget kit for [`egui`]: Inter typography, a 12-step neutral
+//! ramp, one accent, hairline borders, and frosted glass with opt-in **real GPU backdrop blur**.
+//!
+//! ## Presets
+//!
+//! - **Prism** (default): [`PrismTheme::prism_dark`], [`PrismTheme::prism_light`] use the
+//!   [`SurfaceStyle::Layered`] material (solid content, glass only on floating layers);
+//!   [`PrismTheme::prism_glass_dark`], [`PrismTheme::prism_glass_light`] use
+//!   [`SurfaceStyle::Frosted`] (every container is glass).
+//! - **Classic** (v0.2, unchanged): 3D Liquid Glass ([`PrismTheme::frost`], [`PrismTheme::onyx`],
+//!   [`PrismTheme::glacial`]) and Neumorphic ([`PrismTheme::minimal_light`],
+//!   [`PrismTheme::minimal_dark`]).
 //!
 //! ## Rendering Modes
 //!
-//! - **Zero-dependency Fallback (`default = []`)**: Works identically on every `egui` backend
-//!   with translucent multi-stop gradients, cached procedural frost micro-grain, dual-layer 3D
-//!   elevation shadows, and directional machined bevels.
-//! - **`feature = "blur-wgpu"`**: Pure-WGSL 4-level linear Dual-Kawase blur pyramid + Apple
-//!   Liquid Glass composite shader (analytic rounded-rect SDF, curved-bevel lens refraction,
-//!   subtle RGB chromatic dispersion, macOS vibrancy boost, Jimenez IGN micro-grain, and 3D
-//!   studio bevel speculars). Works on `eframe` (`wgpu`), custom `egui-wgpu` loops, and
-//!   headless `egui_kittest` — all with `#![forbid(unsafe_code)]`.
-//! - **`feature = "blur-glow"`**: Live-framebuffer OpenGL 3.3 / GLES 3.0 / WebGL 2.0 grab-pass
-//!   backdrop blur for `eframe` (`glow`) and custom `egui_glow` hosts, preserving
-//!   `#![forbid(unsafe_code)]`.
+//! - **Fallback (no blur feature)**: works on every `egui` backend with translucent films,
+//!   micro-grain, shadows and hairlines.
+//! - **`feature = "blur-wgpu"`**: pure-WGSL Dual-Kawase blur pyramid and glass composite shader
+//!   for `eframe` (`wgpu`), custom `egui-wgpu` loops and headless `egui_kittest`.
+//! - **`feature = "blur-glow"`**: live-framebuffer OpenGL grab-pass blur for `eframe` (`glow`).
+//!
+//! All with `#![forbid(unsafe_code)]`.
 //!
 //! ## Quick Start
 //!
@@ -26,19 +32,22 @@
 //! };
 //!
 //! fn draw_ui(ui: &mut egui::Ui) {
+//!     // Once during setup: the bundled Inter typeface (feature `inter`, on by default).
+//!     egui_prismglass::install_fonts(ui.ctx());
+//!
 //!     // Apply once during setup (or whenever switching themes):
-//!     let theme = PrismTheme::onyx();
+//!     let theme = PrismTheme::prism_dark();
 //!     ui.ctx().set_prism_theme(theme.clone());
 //!
-//!     // Paint the studio backdrop (automatically GPU-accelerated when `blur-wgpu` is installed):
+//!     // Paint the Aurora backdrop (GPU-accelerated when `blur-wgpu` is installed):
 //!     let rect = ui.max_rect();
 //!     paint_prism_backdrop_ui(ui, rect, &theme, 0.0, 1.0);
 //!
 //!     GlassCard::new()
 //!         .elevation(GlassElevation::Elevated)
 //!         .show(ui, |ui| {
-//!             ui.heading("Hello PrismGlass");
-//!             if ui.add(GlassButton::primary("Launch")).clicked() {
+//!             ui.heading("Render queue");
+//!             if ui.add(GlassButton::primary("New render")).clicked() {
 //!                 // Handle click
 //!             }
 //!         });
@@ -54,8 +63,10 @@ pub mod blur_glow;
 #[cfg(feature = "blur-wgpu")]
 pub mod blur_wgpu;
 pub mod painter;
+mod prism;
 pub mod theme;
 pub mod tokens;
+pub mod typography;
 pub mod widgets;
 
 pub use anim::{
@@ -68,16 +79,19 @@ pub use blur::{
 };
 pub use painter::{
     glass_bevel_and_shadow_shapes, glass_surface_shapes, glass_surface_shapes_with_ctx,
-    paint_glass_surface, paint_prism_backdrop, paint_prism_backdrop_ui, paint_radial_glow_orb,
+    paint_glass_surface, paint_glass_surface_ui, paint_prism_backdrop, paint_prism_backdrop_ui,
+    paint_radial_glow_orb,
 };
 pub use theme::{PrismPreset, PrismTheme, SurfaceStyle, ThemeMode};
 pub use tokens::{
-    AccentPalette, BackdropScene, GlassElevation, GlassSurfaceTokens, PrismPalette, RadiusTokens,
-    SpacingTokens,
+    AccentPalette, BackdropScene, GlassElevation, GlassSurfaceTokens, PrismNeutrals, PrismPalette,
+    RadiusTokens, SpacingTokens,
 };
+pub use typography::{FontWeight, fonts_installed, install_fonts, prism_font, prism_numeric_font};
 pub use widgets::{
-    BadgeVariant, GlassBadge, GlassButton, GlassButtonVariant, GlassCard, GlassPanel, GlassSidebar,
-    GlassSlider, GlassToggle, SidebarIcon, SidebarItem,
+    BadgeVariant, GlassBadge, GlassButton, GlassButtonVariant, GlassCard, GlassCheckbox,
+    GlassPanel, GlassProgress, GlassSegmented, GlassSidebar, GlassSlider, GlassToggle, SidebarIcon,
+    SidebarItem,
 };
 
 /// Ergonomic extension methods on [`egui::Context`] for managing [`PrismTheme`] and GPU blur backends.
@@ -85,7 +99,7 @@ pub trait PrismContextExt {
     /// Applies `theme` to this `egui` context and stores it for all `PrismGlass` widgets.
     fn set_prism_theme(&self, theme: PrismTheme);
 
-    /// Returns the currently active [`PrismTheme`] (or [`PrismTheme::onyx()`] if unset).
+    /// Returns the currently active [`PrismTheme`] (or [`PrismTheme::prism_dark()`] if unset).
     fn prism_theme(&self) -> PrismTheme;
 
     /// Installs a custom or built-in [`BackdropBlurProvider`] into this `egui` context.
@@ -96,6 +110,9 @@ pub trait PrismContextExt {
 
     /// Reports the effective [`BlurCapability`] for the current theme and context.
     fn prism_blur_capability(&self) -> BlurCapability;
+
+    /// Installs the bundled Inter typeface used by the Prism presets (see [`install_fonts`]).
+    fn install_prism_fonts(&self);
 }
 
 impl PrismContextExt for egui::Context {
@@ -119,9 +136,14 @@ impl PrismContextExt for egui::Context {
         let theme = self.prism_theme();
         effective_blur_capability(self, &theme)
     }
+
+    fn install_prism_fonts(&self) {
+        install_fonts(self);
+    }
 }
 
 #[cfg(test)]
+#[allow(clippy::float_cmp)] // exact values produced by clamps and constants
 mod tests {
     use super::*;
 
