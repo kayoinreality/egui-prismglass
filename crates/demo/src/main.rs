@@ -1,4 +1,7 @@
-//! Native launcher for the `egui-prismglass` Prism Studio demo (`cargo run -p demo`).
+//! Launcher for the `egui-prismglass` Prism Studio demo.
+//!
+//! - Native: `cargo run -p demo`
+//! - Web: `trunk serve` (or `trunk build --release`) inside `crates/demo`, see `index.html`.
 
 use demo::StudioApp;
 use eframe::egui;
@@ -26,6 +29,28 @@ impl eframe::App for EframeDemo {
     }
 }
 
+/// Installs fonts and the GPU blur provider (when compiled in and available), then builds the app.
+fn create_app(cc: &eframe::CreationContext<'_>) -> EframeDemo {
+    #[cfg(feature = "blur-wgpu")]
+    if let Some(render_state) = cc.wgpu_render_state.as_ref() {
+        egui_prismglass::blur_wgpu::install(&cc.egui_ctx, render_state);
+    }
+
+    #[cfg(feature = "blur-glow")]
+    let glow_blur = cc
+        .gl
+        .as_ref()
+        .and_then(|gl| egui_prismglass::blur_glow::install(&cc.egui_ctx, gl).ok());
+
+    egui_prismglass::install_fonts(&cc.egui_ctx);
+    EframeDemo {
+        app: StudioApp::default(),
+        #[cfg(feature = "blur-glow")]
+        glow_blur,
+    }
+}
+
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
@@ -38,24 +63,37 @@ fn main() -> eframe::Result {
     eframe::run_native(
         "egui-prismglass",
         options,
-        Box::new(|cc| {
-            #[cfg(feature = "blur-wgpu")]
-            if let Some(render_state) = cc.wgpu_render_state.as_ref() {
-                egui_prismglass::blur_wgpu::install(&cc.egui_ctx, render_state);
-            }
-
-            #[cfg(feature = "blur-glow")]
-            let glow_blur = cc
-                .gl
-                .as_ref()
-                .and_then(|gl| egui_prismglass::blur_glow::install(&cc.egui_ctx, gl).ok());
-
-            egui_prismglass::install_fonts(&cc.egui_ctx);
-            Ok(Box::new(EframeDemo {
-                app: StudioApp::default(),
-                #[cfg(feature = "blur-glow")]
-                glow_blur,
-            }))
-        }),
+        Box::new(|cc| Ok(Box::new(create_app(cc)))),
     )
+}
+
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use eframe::wasm_bindgen::JsCast as _;
+
+    wasm_bindgen_futures::spawn_local(async {
+        let document = web_sys::window()
+            .and_then(|w| w.document())
+            .expect("no document");
+        let canvas = document
+            .get_element_by_id("prism_canvas")
+            .expect("missing <canvas id=\"prism_canvas\">")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("#prism_canvas is not a canvas");
+        let start = eframe::WebRunner::new()
+            .start(
+                canvas,
+                eframe::WebOptions::default(),
+                Box::new(|cc| Ok(Box::new(create_app(cc)))),
+            )
+            .await;
+        if let Some(loading) = document.get_element_by_id("loading") {
+            match start {
+                Ok(()) => loading.remove(),
+                Err(e) => loading.set_inner_html(&format!(
+                    "<p>Prism Studio could not start: {e:?}. Your browser may lack WebGL 2.</p>"
+                )),
+            }
+        }
+    });
 }

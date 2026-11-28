@@ -53,6 +53,53 @@
 //!         });
 //! }
 //! ```
+//!
+//! ## Inputs, overlays and icons (v0.4)
+//!
+//! [`GlassTextField`], [`GlassMenu`] / [`GlassPopover`] (on [`egui::Popup`]), [`GlassModal`]
+//! (on [`egui::Modal`]), [`GlassToasts`], the shared [`Icon`] set and kit components such as
+//! [`GlassListRow`], [`GlassChip`], [`GlassKbd`], [`GlassEmptyState`] and [`SectionHeader`].
+//!
+//! ```no_run
+//! use egui_prismglass::{
+//!     GlassButton, GlassMenu, GlassModal, GlassTextField, GlassToasts, Icon, MenuItem, Toast,
+//! };
+//!
+//! struct App { query: String, confirm: bool, toasts: GlassToasts }
+//!
+//! fn ui(app: &mut App, ui: &mut egui::Ui) {
+//!     ui.add(GlassTextField::new(&mut app.query).placeholder("Search").icon(Icon::Search));
+//!
+//!     let more = ui.add(GlassButton::icon_only(Icon::More));
+//!     let _ = GlassMenu::new(&more).show(|ui| {
+//!         ui.add(MenuItem::new("Duplicate").icon(Icon::Copy).shortcut("Ctrl+D"));
+//!         GlassMenu::separator(ui);
+//!         if ui.add(MenuItem::new("Delete").icon(Icon::Trash).danger(true)).clicked() {
+//!             app.confirm = true;
+//!         }
+//!     });
+//!
+//!     let mut deleted = false;
+//!     let _ = GlassModal::new("delete")
+//!         .title("Delete scene?")
+//!         .icon(Icon::Trash)
+//!         .show(ui.ctx(), &mut app.confirm, |ui| {
+//!             GlassModal::footer(ui, |ui| {
+//!                 if ui.add(GlassButton::danger("Delete")).clicked() {
+//!                     deleted = true;
+//!                     ui.close();
+//!                 }
+//!                 if ui.add(GlassButton::secondary("Cancel")).clicked() {
+//!                     ui.close();
+//!                 }
+//!             });
+//!         });
+//!     if deleted {
+//!         app.toasts.add(Toast::success("Scene deleted"));
+//!     }
+//!     app.toasts.show(ui.ctx()); // once per frame, after the rest of the UI
+//! }
+//! ```
 
 use std::sync::Arc;
 
@@ -62,6 +109,7 @@ pub mod blur;
 pub mod blur_glow;
 #[cfg(feature = "blur-wgpu")]
 pub mod blur_wgpu;
+pub mod icons;
 pub mod painter;
 mod prism;
 pub mod theme;
@@ -77,6 +125,7 @@ pub use blur::{
     BackdropBlurProvider, BackdropRequest, BlurCapability, FallbackBlurProvider, blur_provider,
     clear_blur_provider, effective_blur_capability, set_blur_provider,
 };
+pub use icons::{GlassIcon, Icon, paint_icon};
 pub use painter::{
     glass_bevel_and_shadow_shapes, glass_surface_shapes, glass_surface_shapes_with_ctx,
     paint_glass_surface, paint_glass_surface_ui, paint_prism_backdrop, paint_prism_backdrop_ui,
@@ -89,9 +138,11 @@ pub use tokens::{
 };
 pub use typography::{FontWeight, fonts_installed, install_fonts, prism_font, prism_numeric_font};
 pub use widgets::{
-    BadgeVariant, GlassBadge, GlassButton, GlassButtonVariant, GlassCard, GlassCheckbox,
-    GlassPanel, GlassProgress, GlassSegmented, GlassSidebar, GlassSlider, GlassToggle, SidebarIcon,
-    SidebarItem,
+    BadgeVariant, ButtonIcon, GlassBadge, GlassButton, GlassButtonVariant, GlassCard,
+    GlassCheckbox, GlassChip, GlassEmptyState, GlassKbd, GlassListRow, GlassMenu, GlassModal,
+    GlassModalResponse, GlassPanel, GlassPopover, GlassProgress, GlassSegmented, GlassSidebar,
+    GlassSlider, GlassTextField, GlassToasts, GlassToggle, MenuItem, SectionHeader, SidebarIcon,
+    SidebarItem, Toast, ToastAnchor, ToastId, ToastVariant, eyebrow_text,
 };
 
 /// Ergonomic extension methods on [`egui::Context`] for managing [`PrismTheme`] and GPU blur backends.

@@ -6,8 +6,9 @@
 
 #![allow(missing_docs)]
 
+pub mod components;
 pub mod studio;
-pub use studio::StudioApp;
+pub use studio::{StudioApp, StudioPage};
 
 use egui::{
     Align, Color32, CornerRadius, FontId, Frame, Layout, Margin, RichText, ScrollArea, Sense,

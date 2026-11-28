@@ -10,7 +10,7 @@
 use std::fs;
 use std::path::Path;
 
-use demo::{DemoApp, DemoTab, StudioApp};
+use demo::{DemoApp, DemoTab, StudioApp, StudioPage};
 use egui::{Align2, Area, Color32, FontId, Id, Margin, RichText, pos2, vec2};
 use egui_kittest::Harness;
 use egui_prismglass::{
@@ -651,8 +651,27 @@ fn capture_studio_with(
     filename: &str,
     assets_dir: &Path,
 ) {
+    capture_studio_page(
+        preset,
+        accent,
+        real_blur,
+        StudioPage::RenderQueue,
+        filename,
+        assets_dir,
+    );
+}
+
+fn capture_studio_page(
+    preset: PrismPreset,
+    accent: AccentPalette,
+    real_blur: bool,
+    page: StudioPage,
+    filename: &str,
+    assets_dir: &Path,
+) {
     let mut app = StudioApp::with_preset(preset);
     app.set_accent(accent);
+    app.page = page;
     app.theme.real_blur_enabled = real_blur;
 
     let mut installed = false;
@@ -693,6 +712,27 @@ fn capture_studio_with(
 fn main() {
     let assets_dir = Path::new("assets");
     fs::create_dir_all(assets_dir).expect("failed to create assets directory");
+
+    // v0.4 components gallery.
+    capture_studio_page(
+        PrismPreset::PrismDark,
+        AccentPalette::Cobalt,
+        true,
+        StudioPage::Components,
+        "prism-components-dark.png",
+        assets_dir,
+    );
+    capture_studio_page(
+        PrismPreset::PrismGlassLight,
+        AccentPalette::Violet,
+        true,
+        StudioPage::Components,
+        "prism-components-glass-light.png",
+        assets_dir,
+    );
+    if std::env::args().nth(1).as_deref() == Some("components") {
+        return;
+    }
 
     capture_studio(
         PrismPreset::PrismDark,

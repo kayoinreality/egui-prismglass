@@ -6,6 +6,7 @@ use egui::{
     Align2, Color32, FontId, Response, Sense, Stroke, Ui, Vec2, Widget, WidgetText, pos2, vec2,
 };
 
+use crate::icons::Icon;
 use crate::painter::paint_glass_gradient_fill;
 use crate::theme::{PrismTheme, SurfaceStyle, ThemeMode};
 use crate::tokens::scale_alpha;
@@ -26,13 +27,42 @@ pub enum GlassButtonVariant {
     Danger,
 }
 
+/// The leading icon of a [`GlassButton`]: a text glyph (as in v0.3) or a vector [`Icon`].
+///
+/// Created implicitly by [`GlassButton::icon`] from `&str`, `String` or [`Icon`].
+#[derive(Debug, Clone, PartialEq)]
+pub enum ButtonIcon {
+    /// A glyph or short string rendered with the label font (must exist in the font).
+    Glyph(String),
+    /// A vector icon painted with the label color.
+    Vector(Icon),
+}
+
+impl From<&str> for ButtonIcon {
+    fn from(glyph: &str) -> Self {
+        Self::Glyph(glyph.to_owned())
+    }
+}
+
+impl From<String> for ButtonIcon {
+    fn from(glyph: String) -> Self {
+        Self::Glyph(glyph)
+    }
+}
+
+impl From<Icon> for ButtonIcon {
+    fn from(icon: Icon) -> Self {
+        Self::Vector(icon)
+    }
+}
+
 /// A clean, modern frosted-glass button with crisp hairline borders and refined variants.
 ///
 /// Implements [`egui::Widget`], so it can be added directly with `ui.add(GlassButton::primary("Launch"))`.
 #[derive(Clone)]
 pub struct GlassButton {
     text: WidgetText,
-    icon: Option<String>,
+    icon: Option<ButtonIcon>,
     variant: GlassButtonVariant,
     pill: bool,
     min_size: Option<Vec2>,
@@ -84,10 +114,17 @@ impl GlassButton {
         self
     }
 
-    /// Adds a leading glyph or icon string rendered before the button label.
-    pub fn icon(mut self, icon: impl Into<String>) -> Self {
+    /// Adds a leading icon before the label: a vector [`Icon`] (`Icon::Plus`) or, as in v0.3,
+    /// a glyph string (`"+"`). With an empty label the button becomes a square icon button.
+    pub fn icon(mut self, icon: impl Into<ButtonIcon>) -> Self {
         self.icon = Some(icon.into());
         self
+    }
+
+    /// Creates a square, label-less [`GlassButtonVariant::Ghost`] icon button
+    /// (toolbars, list-row actions). Add a tooltip with `.on_hover_text(...)` on the response.
+    pub fn icon_only(icon: Icon) -> Self {
+        Self::ghost("").icon(icon)
     }
 
     /// Enables pill-shaped rounding (`corner_radius = height / 2`).
@@ -146,10 +183,8 @@ impl Widget for GlassButton {
         let min_size = self.min_size.unwrap_or(vec2(0.0, 34.0));
         let padding = vec2(16.0, 8.0);
 
-        let label_text = match &self.icon {
-            Some(ic) => format!("{ic}  {}", self.text.text()),
-            None => self.text.text().to_owned(),
-        };
+        let label_text = self.label_text();
+        let icon_slot = self.icon_slot();
 
         let font_id = FontId::proportional(self.font_size);
         let galley =
@@ -157,7 +192,7 @@ impl Widget for GlassButton {
                 .layout_no_wrap(label_text, font_id.clone(), theme.palette.text_primary);
 
         let desired = vec2(
-            (galley.size().x + padding.x * 2.0).max(min_size.x),
+            (galley.size().x + icon_slot + padding.x * 2.0).max(min_size.x),
             (galley.size().y + padding.y * 2.0).max(min_size.y),
         );
 
@@ -231,8 +266,14 @@ impl Widget for GlassButton {
                 ui.painter().add(egui::Shape::Vec(shapes));
 
                 let text_pos = pos2(
-                    rect.center().x,
+                    rect.center().x + icon_slot * 0.5,
                     rect.center().y + if pressed { 0.5 } else { 0.0 },
+                );
+                self.paint_vector_icon(
+                    ui.painter(),
+                    text_pos,
+                    galley.size().x,
+                    scale_alpha(Color32::WHITE, alpha_mult),
                 );
                 ui.painter().text(
                     text_pos,
@@ -311,8 +352,14 @@ impl Widget for GlassButton {
                 }
 
                 let text_pos = pos2(
-                    rect.center().x,
+                    rect.center().x + icon_slot * 0.5,
                     rect.center().y + if pressed { 0.5 } else { 0.0 },
+                );
+                self.paint_vector_icon(
+                    ui.painter(),
+                    text_pos,
+                    galley.size().x,
+                    scale_alpha(text_col, alpha_mult),
                 );
                 ui.painter().text(
                     text_pos,
@@ -556,22 +603,69 @@ fn resolve_button_colors(
 }
 
 impl GlassButton {
+    /// The label as laid out: glyph icons are prefixed to the text (v0.3 behavior).
+    fn label_text(&self) -> String {
+        match &self.icon {
+            Some(ButtonIcon::Glyph(ic)) => format!("{ic}  {}", self.text.text()),
+            _ => self.text.text().to_owned(),
+        }
+    }
+
+    /// Horizontal room reserved for a vector icon (icon plus gap), `0` otherwise.
+    fn icon_slot(&self) -> f32 {
+        match self.icon {
+            Some(ButtonIcon::Vector(_)) => {
+                let size = (self.font_size * 1.1).round();
+                if self.text.text().is_empty() {
+                    size
+                } else {
+                    size + 6.0
+                }
+            }
+            _ => 0.0,
+        }
+    }
+
+    /// Paints the vector icon to the left of a label centered at `label_center`.
+    fn paint_vector_icon(
+        &self,
+        painter: &egui::Painter,
+        label_center: egui::Pos2,
+        label_width: f32,
+        color: Color32,
+    ) {
+        if let Some(ButtonIcon::Vector(icon)) = self.icon {
+            let size = (self.font_size * 1.1).round();
+            let left = label_center.x - label_width * 0.5 - self.icon_slot();
+            let rect = egui::Rect::from_min_size(
+                pos2(left, label_center.y - size * 0.5),
+                vec2(size, size),
+            );
+            icon.paint(painter, rect, color);
+        }
+    }
+
     /// Prism-style rendering: flat fills, hairline borders, Inter Medium labels.
     fn prism_ui(self, ui: &mut Ui, theme: &PrismTheme) -> Response {
         use super::prism_paint::{control_colors, drop_shadow, fill, shade, top_highlight};
         use crate::typography::{FontWeight, prism_font};
 
         let font_id = prism_font(ui.ctx(), self.font_size, FontWeight::Medium);
-        let label_text = match &self.icon {
-            Some(ic) => format!("{ic}  {}", self.text.text()),
-            None => self.text.text().to_owned(),
-        };
+        let label_text = self.label_text();
+        let icon_slot = self.icon_slot();
         let galley = ui
             .painter()
             .layout_no_wrap(label_text, font_id, theme.palette.text_primary);
         let min_size = self.min_size.unwrap_or(vec2(0.0, 32.0));
         let desired = vec2(
-            (galley.size().x + 24.0).max(min_size.x),
+            (galley.size().x
+                + icon_slot
+                + if icon_slot > 0.0 && self.text.text().is_empty() {
+                    16.0
+                } else {
+                    24.0
+                })
+            .max(min_size.x),
             (galley.size().y + 12.0).max(min_size.y),
         );
         let sense = if self.enabled {
@@ -695,8 +789,17 @@ impl GlassButton {
         };
 
         let text_pos = pos2(
-            rect.center().x - galley.size().x * 0.5,
+            rect.center().x + icon_slot * 0.5 - galley.size().x * 0.5,
             rect.center().y - galley.size().y * 0.5 + if pressed { 0.5 } else { 0.0 },
+        );
+        self.paint_vector_icon(
+            painter,
+            pos2(
+                rect.center().x + icon_slot * 0.5,
+                rect.center().y + if pressed { 0.5 } else { 0.0 },
+            ),
+            galley.size().x,
+            scale_alpha(text_color, alpha),
         );
         painter.galley_with_override_text_color(text_pos, galley, scale_alpha(text_color, alpha));
         response

@@ -15,6 +15,9 @@ Thank you for your interest in contributing to **egui-prismglass**! We welcome b
 # Run the interactive showcase app
 cargo run -p demo
 
+# Run the web demo (needs `rustup target add wasm32-unknown-unknown` and `cargo install trunk`)
+cd crates/demo && trunk serve
+
 # Run all unit & doc tests
 cargo test -p egui-prismglass --all-features
 
@@ -26,10 +29,11 @@ cargo clippy --workspace --all-targets --all-features -- -D warnings
 ## Good First Issues
 
 Looking for an entry point? Check issues labeled `good first issue`, such as:
-- Adding new glass widgets (`GlassTextField`, `GlassModal`, `GlassTabs`, `GlassProgressBar`)
+- Adding new glass widgets (`GlassTabs`, `GlassSelect`, tooltips, a command palette)
 - Creating new `PrismPreset` themes (e.g., Catppuccin-inspired or High-Contrast Glass)
 - Adding snapshot visual regression tests with `egui_kittest`
-- Improving WASM showcase deployment
+- Improving the WASM web demo (e.g. GPU backdrop blur on WebGPU)
+- Adding icons to the shared `Icon` set (16 pt grid, 1.5 pt stroke)
 
 ## Pull Request Checklist
 

@@ -11,6 +11,7 @@ Inter typography, a 12-step neutral ramp, one accent, hairline borders and real 
 [![Docs.rs](https://docs.rs/egui-prismglass/badge.svg)](https://docs.rs/egui-prismglass)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![egui 0.37](https://img.shields.io/badge/egui-0.37.0-9CA7DE.svg)](https://crates.io/crates/egui/0.37.0)
+[![Live demo](https://img.shields.io/badge/demo-live%20in%20your%20browser-6E56CF.svg)](https://kayoinreality.github.io/egui-prismglass/)
 
 ![Prism Dark — the Prism Studio demo](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/prism-dark.png)
 
@@ -51,6 +52,8 @@ Without a GPU blur provider, glass falls back to a denser frosted film, so it st
 
 ## Try the demo
 
+**In your browser:** [kayoinreality.github.io/egui-prismglass](https://kayoinreality.github.io/egui-prismglass/) (WebAssembly, pure-`egui` glass fallback, any WebGL 2 browser).
+
 ```bash
 # Prism Studio: real WGSL Dual-Kawase blur on eframe + wgpu
 cargo run -p demo
@@ -59,7 +62,17 @@ cargo run -p demo
 cargo run -p demo --example glow_blur --no-default-features --features blur-glow
 ```
 
-**Prism Studio** is a realistic render-queue app: a glass sidebar, filters, a stats strip, a sortable job table, an inspector and a floating action bar. Its **Appearance** controls switch between Dark/Light, Layered/All glass and every accent palette. The sidebar's **Classic showcase** entry opens the original v0.2 demo.
+**Prism Studio** is a realistic render-queue app: a glass sidebar, filters, a stats strip, a sortable job table, an inspector and a floating action bar, with menus, a confirmation modal and toasts. The **Components** page shows every v0.4 widget (text fields, menus and popovers, modal, toasts, kit components and the icon set). Its **Appearance** controls switch between Dark/Light, Layered/All glass and every accent palette. The sidebar's **Classic showcase** entry opens the original v0.2 demo.
+
+![Prism Studio — Components page](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/assets/prism-components-dark.png)
+
+To build the web demo yourself:
+
+```bash
+rustup target add wasm32-unknown-unknown
+cargo install --locked trunk
+cd crates/demo && trunk serve   # or: trunk build --release
+```
 
 ---
 
@@ -71,7 +84,7 @@ cargo run -p demo --example glow_blur --no-default-features --features blur-glow
 [dependencies]
 egui = "0.37.0"
 # `blur-wgpu` enables real GPU frosted glass on eframe's default wgpu backend:
-egui-prismglass = { version = "0.3.0", features = ["blur-wgpu"] }
+egui-prismglass = { version = "0.4.0", features = ["blur-wgpu"] }
 # Or `features = ["blur-glow"]` for eframe+glow, or no features for the pure-egui fallback.
 ```
 
@@ -125,16 +138,67 @@ fn render_ui(ui: &mut egui::Ui, state: &mut State) {
 }
 ```
 
-| Widget | Purpose |
-| :--- | :--- |
-| `GlassCard`, `GlassPanel`, `GlassSidebar` | Containers whose material follows the theme (solid or glass) |
-| `paint_glass_surface_ui` | Paint a themed surface into any rect (docked regions, custom layouts) |
-| `GlassButton` | `primary` / `secondary` / `ghost` / `danger` (+ `accent`, `tint`, `pill`, `icon`) |
-| `GlassSegmented` | Tabs, filters and view modes, with optional counts |
-| `GlassToggle`, `GlassCheckbox`, `GlassSlider` | Switch, checkbox and slider with Inter readouts |
-| `GlassBadge` | Neutral status pill; color only in the status dot |
-| `GlassProgress` | Thin progress bar for jobs, uploads and quotas |
-| `SidebarItem` | Navigation row with built-in icons (`List`, `Layers`, `Clock`, `Chart`, `Folder`, …) |
+| Widget | Purpose | Since |
+| :--- | :--- | :---: |
+| `GlassCard`, `GlassPanel`, `GlassSidebar` | Containers whose material follows the theme (solid or glass) | 0.1 |
+| `paint_glass_surface_ui` | Paint a themed surface into any rect (docked regions, custom layouts) | 0.3 |
+| `GlassButton` | `primary` / `secondary` / `ghost` / `danger` (+ `accent`, `tint`, `pill`, `icon(Icon)`, `icon_only`) | 0.1 |
+| `GlassSegmented` | Tabs, filters and view modes, with `counts` or per-segment `optional_counts` | 0.3 |
+| `GlassToggle`, `GlassCheckbox`, `GlassSlider` | Switch, checkbox and slider with Inter readouts | 0.1 |
+| `GlassBadge` | Neutral status pill; color only in the status dot | 0.1 |
+| `GlassProgress` | Thin progress bar for jobs, uploads and quotas | 0.3 |
+| `SidebarItem` | Navigation row with built-in icons, or any `Icon` (`SidebarItem::with_icon`) | 0.1 |
+| `GlassTextField` | Single-line / multiline input: placeholder, leading icon, label, help, focus / error / disabled states, password | **0.4** |
+| `GlassModal` | Dialog over a scrim on `egui::Modal`: focus stays inside, `Esc` / scrim click close, title / body / footer actions | **0.4** |
+| `GlassToasts`, `Toast` | Queued notifications: success / warning / danger / info, auto-dismiss with a progress bar, stacking, hover to pause | **0.4** |
+| `GlassMenu`, `MenuItem`, `GlassPopover` | Dropdown and context menus (icons, shortcuts, separators, submenus) and popovers on `egui::Popup` | **0.4** |
+| `Icon`, `GlassIcon` | 65 vector icons painted on a 16 pt grid (no icon font), shared by every widget | **0.4** |
+| `GlassListRow`, `GlassChip`, `GlassKbd`, `GlassEmptyState`, `SectionHeader` | Kit components: selectable list row with marker, chip, key cap, empty state, tracked section header | **0.4** |
+
+### Inputs, overlays and icons (v0.4)
+
+```rust
+use egui_prismglass::{
+    GlassButton, GlassMenu, GlassModal, GlassTextField, GlassToasts, Icon, MenuItem, Toast,
+};
+
+struct App { query: String, confirm: bool, toasts: GlassToasts }
+
+fn ui(app: &mut App, ui: &mut egui::Ui) {
+    ui.add(GlassTextField::new(&mut app.query).placeholder("Search").icon(Icon::Search));
+
+    let more = ui.add(GlassButton::icon_only(Icon::More));
+    let _ = GlassMenu::new(&more).show(|ui| {
+        ui.add(MenuItem::new("Duplicate").icon(Icon::Copy).shortcut("Ctrl+D"));
+        GlassMenu::separator(ui);
+        if ui.add(MenuItem::new("Delete").icon(Icon::Trash).danger(true)).clicked() {
+            app.confirm = true;
+        }
+    });
+
+    let mut deleted = false;
+    let _ = GlassModal::new("delete")
+        .title("Delete scene?")
+        .icon(Icon::Trash)
+        .show(ui.ctx(), &mut app.confirm, |ui| {
+            GlassModal::footer(ui, |ui| {
+                if ui.add(GlassButton::danger("Delete")).clicked() {
+                    deleted = true;
+                    ui.close();
+                }
+                if ui.add(GlassButton::secondary("Cancel")).clicked() {
+                    ui.close();
+                }
+            });
+        });
+    if deleted {
+        app.toasts.add(Toast::success("Scene deleted"));
+    }
+    app.toasts.show(ui.ctx()); // once per frame, after the rest of the UI
+}
+```
+
+![v0.4 overlays: menu, modal and toasts](https://raw.githubusercontent.com/kayoinreality/egui-prismglass/main/crates/egui-prismglass/tests/snapshots/v04_overlays_prism_glass_dark.png)
 
 ---
 
@@ -180,9 +244,12 @@ The original 3D Liquid Glass and Neumorphic presets ship unchanged (`Frost`, `On
 
 `egui-prismglass` pins its `egui` version explicitly and documents every supported pairing below:
 
+**Upgrading from 0.3 to 0.4** is source-compatible for typical code. The only signature change is `GlassButton::icon`, which now takes `impl Into<ButtonIcon>` instead of `impl Into<String>`: `&str` and `String` (and the new `Icon`) work as before, but other `Into<String>` types (e.g. `Cow<str>`, `Box<str>`) need `.to_string()` first. Everything else is additive. The library also builds for `wasm32-unknown-unknown` (checked in CI).
+
 | `egui-prismglass` | `egui` / `eframe` | `wgpu` / `glow` | MSRV | Status |
 | :---: | :---: | :---: | :---: | :---: |
-| `0.3.x` | `0.37.0` | `wgpu 30.0` / `glow 0.17` | `1.95` | Supported (current) |
+| `0.4.x` | `0.37.0` | `wgpu 30.0` / `glow 0.17` | `1.95` | Supported (current) |
+| `0.3.x` | `0.37.0` | `wgpu 30.0` / `glow 0.17` | `1.95` | Maintenance |
 | `0.2.x` | `0.37.0` | `wgpu 30.0` / `glow 0.17` | `1.95` | Maintenance |
 | `0.1.x` | `0.37.0` | — (fallback only) | `1.95` | Maintenance |
 
@@ -190,13 +257,14 @@ The original 3D Liquid Glass and Neumorphic presets ship unchanged (`Frost`, `On
 
 ## Visual Regression Matrix & Reproducible Benchmarks
 
-`egui-prismglass` ships with a **12-test automated GPU visual regression matrix** (executed in CI on every push) and **reproducible CPU + GPU benchmarks**. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for the complete methodology, JSON export, and integrated GPU (Intel Iris Xe / AMD Radeon 780M / Apple Silicon UMA) bandwidth analysis.
+`egui-prismglass` ships with an **18-test automated GPU visual regression matrix** (executed in CI on every push) and **reproducible CPU + GPU benchmarks**. See [`docs/BENCHMARKS.md`](docs/BENCHMARKS.md) for the complete methodology, JSON export, and integrated GPU (Intel Iris Xe / AMD Radeon 780M / Apple Silicon UMA) bandwidth analysis.
 
 ### Automated Visual & Shader Test Matrix
 
 | Domain | Verified Invariants (`visual_regression.rs`) |
 | :--- | :--- |
-| **Golden Snapshots & Determinism** | Bit-exact frame determinism + 8 golden PNG baselines (`Glacial`, `Onyx`, `Frost`, `Tinted Pills`, `Minimal Light`, `Minimal Dark`, `Prism Dark (Layered)`, `Prism Glass Light (All glass)`) with `PRISMGLASS_UPDATE_SNAPSHOTS=1` refresh workflow |
+| **Golden Snapshots & Determinism** | Bit-exact frame determinism + 11 golden PNG baselines (`Glacial`, `Onyx`, `Frost`, `Tinted Pills`, `Minimal Light`, `Minimal Dark`, `Prism Dark (Layered)`, `Prism Glass Light (All glass)`, and the v0.4 widgets: controls in Prism Dark / Light, overlays in Prism Glass Dark) with `PRISMGLASS_UPDATE_SNAPSHOTS=1` refresh workflow |
+| **v0.4 Widgets** | Text fields in every state, kit components and icons, an open menu with a submenu row, a modal over its scrim (scrim dims the screen) and a stack of toasts with progress bars |
 | **Prism Materials** | Layered content cards stay opaque and identical over any backdrop; All-glass cards pick up the backdrop beneath them |
 | **Clipping & Rounding** | Zero pixel bleed outside `ui.set_clip_rect(...)` / `ScrollArea`; analytic SDF corner masking at `0 pt`, `24 pt`, and `999 pt` clamped pill |
 | **DPI & Resolution Matrix** | `1.0x`, `1.5x`, `2.0x`, `2.5x` DPI scaling + dynamic runtime resize (`320×240 → 640×360 → 800×600 → 1280×720`) with exact 6-texture VRAM accounting |
@@ -219,7 +287,7 @@ The original 3D Liquid Glass and Neumorphic presets ship unchanged (`Frost`, `On
 *(Baseline measured in headless software Vulkan `llvmpipe` — 50×–200× slower than hardware GPUs, while preserving exact `O(W·H)` scaling and VRAM/cache counts. At `16–64` simultaneous cards, cached GPU Liquid Glass (`1.706 ms/surf`) also outperforms pure-`egui` fallback (`2.548 ms/surf`).)*
 
 ```bash
-# Run the 17-test GPU visual regression & shader invariant matrix:
+# Run the 18-test GPU visual regression & shader invariant matrix:
 cargo test -p egui-prismglass --features blur-wgpu --test visual_regression
 
 # Run reproducible CPU micro-benchmarks:
@@ -236,7 +304,8 @@ cargo run --release -p egui-prismglass --features blur-wgpu --example gpu_benchm
 - [x] **v0.1.0**: Design tokens, 5 built-in presets across 3D Apple Glass & Minimal Solid, directional 3D bevel glass painter, spring & easing animation kit (`anim`), 7 core widgets, interactive `demo`, CI across Linux/Windows/macOS.
 - [x] **v0.2.0**: Real GPU backdrop blur & Apple Liquid Glass rendering (`blur-wgpu` WGSL Dual-Kawase + SDF bevel refraction/dispersion/vibrancy, `blur-glow` live OpenGL grab-pass, optical material tokens, 3 procedural studio scenes, upgraded fallback micro-grain & dual shadows).
 - [x] **v0.3.0**: Prism design language: four Prism presets (Layered & All glass, dark & light), bundled Inter typography, Aurora backdrop, `GlassSegmented`, `GlassProgress`, `GlassCheckbox`, a `danger` button and the Prism Studio demo.
-- [ ] **v0.4.0**: `GlassTextField`, `GlassModal`, `GlassToast`, menus/popovers + WASM live web demo.
+- [x] **v0.4.0**: `GlassTextField`, `GlassModal`, `GlassToasts`, `GlassMenu` / `GlassPopover` on `egui::Popup`, the shared `Icon` set (ported from PrismCast Studio), kit components (`GlassListRow`, `GlassChip`, `GlassKbd`, `GlassEmptyState`, `SectionHeader`), `GlassSegmented::optional_counts`, and the live WebAssembly demo on GitHub Pages.
+- [ ] **Next**: `GlassTabs`, `GlassSelect` / combo box, tooltips, a command palette, data table helpers, and GPU backdrop blur on the web (WebGPU).
 
 ---
 

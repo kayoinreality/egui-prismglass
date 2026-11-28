@@ -90,3 +90,10 @@ pub(crate) fn shade(color: Color32, amount: f32) -> Color32 {
         blend_colors(color, Color32::BLACK, -amount)
     }
 }
+
+/// `color` with its alpha replaced by `alpha` (for opaque theme colors used as light tints).
+pub(crate) fn with_alpha(color: Color32, alpha: u8) -> Color32 {
+    let [r, g, b, a] = color.to_srgba_unmultiplied();
+    let _ = a;
+    Color32::from_rgba_unmultiplied(r, g, b, alpha)
+}

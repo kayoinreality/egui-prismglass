@@ -19,7 +19,7 @@ use crate::typography::{FontWeight, prism_font, prism_numeric_font};
 pub struct GlassSegmented<'a> {
     selected: &'a mut usize,
     labels: Vec<String>,
-    counts: Vec<u32>,
+    counts: Vec<Option<u32>>,
     fill_width: bool,
     height: f32,
 }
@@ -38,6 +38,20 @@ impl<'a> GlassSegmented<'a> {
 
     /// Shows a muted count after each label (e.g. number of items behind a filter).
     pub fn counts(mut self, counts: &[u32]) -> Self {
+        self.counts = counts.iter().copied().map(Some).collect();
+        self
+    }
+
+    /// Like [`Self::counts`], but per segment: `None` shows no count at all (instead of `0`).
+    ///
+    /// ```no_run
+    /// # use egui_prismglass::GlassSegmented;
+    /// # fn demo(ui: &mut egui::Ui, tab: &mut usize) {
+    /// // "Errors" shows its count only when there is something to report.
+    /// ui.add(GlassSegmented::new(tab, &["All", "Errors"]).optional_counts(&[Some(12), None]));
+    /// # }
+    /// ```
+    pub fn optional_counts(mut self, counts: &[Option<u32>]) -> Self {
         self.counts = counts.to_vec();
         self
     }
@@ -72,7 +86,7 @@ impl Widget for GlassSegmented<'_> {
                     label_font.clone(),
                     theme.palette.text_primary,
                 );
-                let count = self.counts.get(i).map(|c| {
+                let count = self.counts.get(i).copied().flatten().map(|c| {
                     ui.painter().layout_no_wrap(
                         c.to_string(),
                         count_font.clone(),
@@ -225,9 +239,27 @@ mod tests {
                         .counts(&[3, 2, 1]),
                 );
                 ui.add(GlassSegmented::new(&mut selected, &["1080p", "4K"]).fill_width(true));
+                ui.add(
+                    GlassSegmented::new(&mut selected, &["All", "Errors"])
+                        .optional_counts(&[Some(4), None]),
+                );
             });
             output.textures_delta.clear();
             assert_eq!(selected, 1);
         }
+    }
+
+    #[test]
+    fn optional_counts_hide_missing_values() {
+        let mut selected = 0;
+        let seg = GlassSegmented::new(&mut selected, &["A", "B", "C"]).optional_counts(&[
+            Some(3),
+            None,
+            Some(0),
+        ]);
+        assert_eq!(seg.counts, vec![Some(3), None, Some(0)]);
+        let mut selected = 0;
+        let seg = GlassSegmented::new(&mut selected, &["A"]).counts(&[7]);
+        assert_eq!(seg.counts, vec![Some(7)]);
     }
 }

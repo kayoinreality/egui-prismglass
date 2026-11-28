@@ -7,17 +7,18 @@
 
 use egui::{
     Align, Align2, Color32, ComboBox, CornerRadius, Layout, Margin, Rect, RichText, ScrollArea,
-    Sense, Stroke, TextEdit, Ui, UiBuilder, pos2, vec2,
+    Sense, Stroke, Ui, UiBuilder, pos2, vec2,
 };
 use egui_prismglass::{
-    AccentPalette, FontWeight, GlassButton, GlassCheckbox, GlassElevation, GlassProgress,
-    GlassSegmented, GlassSidebar, GlassSlider, GlassToggle, PrismContextExt, PrismPreset,
-    PrismTheme, SidebarIcon, SidebarItem, SurfaceStyle, ThemeMode, install_fonts,
-    paint_glass_surface_ui, paint_prism_backdrop_ui, paint_radial_glow_orb,
-    painter::paint_glass_gradient_fill, prism_font, prism_numeric_font,
+    AccentPalette, FontWeight, GlassButton, GlassCheckbox, GlassElevation, GlassMenu, GlassModal,
+    GlassProgress, GlassSegmented, GlassSidebar, GlassSlider, GlassTextField, GlassToasts,
+    GlassToggle, Icon, MenuItem, PrismContextExt, PrismPreset, PrismTheme, SidebarItem,
+    SurfaceStyle, ThemeMode, Toast, install_fonts, paint_glass_surface_ui, paint_prism_backdrop_ui,
+    paint_radial_glow_orb, painter::paint_glass_gradient_fill, prism_font, prism_numeric_font,
 };
 
 use crate::DemoApp;
+use crate::components::ComponentsPage;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum JobStatus {
@@ -176,9 +177,24 @@ fn sample_jobs() -> Vec<Job> {
     ]
 }
 
+/// Which page of Prism Studio is shown.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub enum StudioPage {
+    /// The render queue (table, inspector, floating action bar).
+    #[default]
+    RenderQueue,
+    /// The v0.4 components gallery.
+    Components,
+}
+
 /// State of the Prism Studio demo.
 #[allow(clippy::struct_excessive_bools)]
 pub struct StudioApp {
+    pub page: StudioPage,
+    pub components: ComponentsPage,
+    pub toasts: GlassToasts,
+    pub confirm_cancel: bool,
+    pub sort: usize,
     pub theme: PrismTheme,
     pub mode: ThemeMode,
     pub material: SurfaceStyle,
@@ -212,6 +228,11 @@ impl StudioApp {
             PrismTheme::prism_dark()
         };
         Self {
+            page: StudioPage::RenderQueue,
+            components: ComponentsPage::default(),
+            toasts: GlassToasts::new(),
+            confirm_cancel: false,
+            sort: 0,
             mode: theme.mode,
             material: theme.surface_style,
             accent: theme.accent_palette,
@@ -282,12 +303,55 @@ impl StudioApp {
         if !frosted {
             panel = panel.with_corner_radius(0.0);
         }
-        paint_glass_surface_ui(ui, main_rect, &panel, false);
-        paint_glass_surface_ui(ui, inspector_rect, &panel, false);
-
         self.sidebar(ui, sidebar_rect, frosted);
-        self.main_column(ui, main_rect);
-        self.inspector(ui, inspector_rect);
+        match self.page {
+            StudioPage::RenderQueue => {
+                paint_glass_surface_ui(ui, main_rect, &panel, false);
+                paint_glass_surface_ui(ui, inspector_rect, &panel, false);
+                self.main_column(ui, main_rect);
+                self.inspector(ui, inspector_rect);
+                self.cancel_dialog(ui);
+            }
+            StudioPage::Components => {
+                let page_rect = main_rect.union(inspector_rect);
+                paint_glass_surface_ui(ui, page_rect, &panel, false);
+                let theme = self.theme.clone();
+                self.components
+                    .show(ui, page_rect, &theme, &mut self.toasts);
+            }
+        }
+        self.toasts.show(ui.ctx());
+    }
+
+    /// Confirmation dialog for the floating bar's "Cancel" action.
+    fn cancel_dialog(&mut self, ui: &mut Ui) {
+        let selected = self.jobs.iter().filter(|j| j.checked).count();
+        let mut confirmed = false;
+        let _ = GlassModal::new("cancel-jobs")
+            .title(format!(
+                "Cancel {selected} render{}?",
+                if selected == 1 { "" } else { "s" }
+            ))
+            .description("Frames rendered so far are kept; the jobs move to Failed.")
+            .icon_colored(Icon::Stop, self.theme.palette.danger)
+            .show(ui.ctx(), &mut self.confirm_cancel, |ui| {
+                GlassModal::footer(ui, |ui| {
+                    if ui.add(GlassButton::danger("Cancel renders")).clicked() {
+                        confirmed = true;
+                        ui.close();
+                    }
+                    if ui.add(GlassButton::secondary("Keep rendering")).clicked() {
+                        ui.close();
+                    }
+                });
+            });
+        if confirmed {
+            self.set_checked_status(JobStatus::Failed);
+            self.toasts.add(
+                Toast::warning(format!("{selected} render(s) cancelled"))
+                    .body("You can re-queue them from History."),
+            );
+        }
     }
 
     // ----------------------------------------------------------------------------------------
@@ -307,13 +371,25 @@ impl StudioApp {
                 brand_header(ui, &theme);
                 ui.add_space(18.0);
 
-                SidebarItem::new(SidebarIcon::List, "Render queue")
+                if SidebarItem::with_icon(Icon::List, "Render queue")
                     .badge("4")
-                    .selected(true)
-                    .show(ui);
-                SidebarItem::new(SidebarIcon::Layers, "Assets").show(ui);
-                SidebarItem::new(SidebarIcon::Clock, "History").show(ui);
-                SidebarItem::new(SidebarIcon::Chart, "Usage").show(ui);
+                    .selected(self.page == StudioPage::RenderQueue)
+                    .show(ui)
+                    .clicked()
+                {
+                    self.page = StudioPage::RenderQueue;
+                }
+                if SidebarItem::with_icon(Icon::Widgets, "Components")
+                    .badge("New")
+                    .selected(self.page == StudioPage::Components)
+                    .show(ui)
+                    .clicked()
+                {
+                    self.page = StudioPage::Components;
+                }
+                SidebarItem::with_icon(Icon::Layers, "Assets").show(ui);
+                SidebarItem::with_icon(Icon::Clock, "History").show(ui);
+                SidebarItem::with_icon(Icon::Chart, "Usage").show(ui);
                 ui.add_space(18.0);
 
                 section_label(ui, &theme, "Projects");
@@ -331,7 +407,7 @@ impl StudioApp {
 
                 ui.with_layout(Layout::bottom_up(Align::Min), |ui| {
                     ui.spacing_mut().item_spacing = vec2(0.0, 10.0);
-                    if SidebarItem::new(SidebarIcon::Grid, "Classic showcase")
+                    if SidebarItem::with_icon(Icon::Sun, "Classic showcase")
                         .show(ui)
                         .clicked()
                     {
@@ -425,16 +501,33 @@ impl StudioApp {
                 );
                 ui.scope_builder(UiBuilder::new().max_rect(row), |ui| {
                     ui.horizontal_centered(|ui| {
-                        let counts = self.filter_counts();
+                        // Zero counts are hidden (`None`) instead of showing "0".
+                        let counts = self.filter_counts().map(|c| (c > 0).then_some(c));
                         ui.add(
                             GlassSegmented::new(
                                 &mut self.filter,
                                 &["All", "Active", "Done", "Failed"],
                             )
-                            .counts(&counts),
+                            .optional_counts(&counts),
                         );
                         ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
-                            ui.add(GlassButton::ghost("Sort: Priority").min_size(vec2(0.0, 28.0)));
+                            const SORTS: [&str; 3] = ["Priority", "Progress", "Name"];
+                            let sort = ui.add(
+                                GlassButton::ghost(format!("Sort: {}", SORTS[self.sort]))
+                                    .icon(Icon::ChevronDown)
+                                    .min_size(vec2(0.0, 28.0)),
+                            );
+                            let _ = GlassMenu::new(&sort).min_width(160.0).show(|ui| {
+                                GlassMenu::section(ui, "Sort by");
+                                for (i, label) in SORTS.into_iter().enumerate() {
+                                    if ui
+                                        .add(MenuItem::new(label).checked(self.sort == i))
+                                        .clicked()
+                                    {
+                                        self.sort = i;
+                                    }
+                                }
+                            });
                         });
                     });
                 });
@@ -507,13 +600,27 @@ impl StudioApp {
                 });
                 ui.with_layout(Layout::right_to_left(Align::Center), |ui| {
                     ui.spacing_mut().item_spacing = vec2(10.0, 0.0);
-                    ui.add(GlassButton::primary("New render").icon("+"));
-                    ui.add(GlassButton::secondary("Filter"));
+                    if ui
+                        .add(GlassButton::primary("New render").icon(Icon::Plus))
+                        .clicked()
+                    {
+                        self.toasts.add(
+                            Toast::success("Render queued")
+                                .body("“Untitled” · 1920×1080 · 512 samples"),
+                        );
+                    }
+                    let filter = ui.add(GlassButton::secondary("Filter").icon(Icon::Filter));
+                    let _ = GlassMenu::new(&filter).show(|ui| {
+                        ui.add(MenuItem::new("Only my jobs").icon(Icon::User));
+                        ui.add(MenuItem::new("GPU jobs").icon(Icon::Bolt));
+                        GlassMenu::separator(ui);
+                        ui.add(MenuItem::new("Clear filters").icon(Icon::Close));
+                    });
                     ui.add(
-                        TextEdit::singleline(&mut self.search)
-                            .hint_text("Search jobs")
-                            .desired_width(200.0)
-                            .margin(Margin::symmetric(10, 8)),
+                        GlassTextField::new(&mut self.search)
+                            .placeholder("Search jobs")
+                            .icon(Icon::Search)
+                            .width(200.0),
                     );
                 });
             },
@@ -734,7 +841,7 @@ impl StudioApp {
                     .add(GlassButton::ghost("Cancel").min_size(small))
                     .clicked()
                 {
-                    self.set_checked_status(JobStatus::Failed);
+                    self.confirm_cancel = true;
                 }
                 if ui
                     .add(GlassButton::ghost("Clear").min_size(small))
