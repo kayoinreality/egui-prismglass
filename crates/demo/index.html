@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Prism Studio · egui-prismglass</title>
+  <meta name="description" content="Live WebAssembly demo of egui-prismglass, a design system and widget kit for egui." />
+  <!-- Build with `trunk build --release` from crates/demo. The web demo uses the pure-egui
+       glass fallback (no GPU backdrop blur), which runs on any WebGL 2 browser. -->
+  <link data-trunk rel="rust" data-bin="demo" data-cargo-no-default-features data-wasm-opt="z" />
+  <style>
+    html, body { margin: 0; padding: 0; height: 100%; overflow: hidden; background: #0b0b0e; }
+    canvas { display: block; width: 100%; height: 100%; outline: none; }
+    #loading { position: absolute; inset: 0; display: grid; place-items: center;
+      color: #a1a1aa; font: 14px system-ui, -apple-system, "Segoe UI", sans-serif; }
+  </style>
+</head>
+<body>
+  <canvas id="prism_canvas"></canvas>
+  <div id="loading">Loading Prism Studio…</div>
+</body>
+</html>
